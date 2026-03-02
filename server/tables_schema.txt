@@ -1,0 +1,10 @@
+[dotenv@17.2.4] injecting env (18) from .env -- tip: ΓÜÖ∩╕Å  suppress all logs with { quiet: true }
+--- SESSIONS columns ---
+2026-02-19 13:59:06 [[34mdebug[39m]: New database connection established in pool {"service":"bitsathy-auth"}
+id, title, description, evaluation_mode, academic_year, semester, status, opens_at, closes_at, created_by, created_at, updated_at, cohort_id, pool_size, allow_assign_all, normalize_by_sessions, normalize_by_hours, normalize_by_role, venue, session_date, session_time, finalized_at, credibility_snapshot, snapshot_version, pool_total_per_judge, evaluation_cycle_id, session_week_start, session_week_end, editable_by_faculty, auto_suggested
+
+--- SCOPE columns ---
+id, faculty_id, track_id, department_code, is_active, scope_version, created_at, updated_at, created_by
+
+--- TRACK SELECTIONS columns ---
+id, person_id, track, academic_year, semester, selected_at

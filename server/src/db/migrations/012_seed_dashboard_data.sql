@@ -1,0 +1,7 @@
+-- ============================================================
+-- SEED 012: No seed data needed (SRS-Compliant)
+-- ============================================================
+-- SRS-compliant credibility system uses only the
+-- evaluator_credibility_profiles table (from migration 010).
+-- Credibility is computed automatically — no seed events needed.
+-- ============================================================

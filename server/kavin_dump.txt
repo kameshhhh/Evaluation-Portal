@@ -1,0 +1,62 @@
+--- DIAGNOSIS FOR: kavinkumar.ed23@bitsathy.ac.in ---
+❌ User not found.
+
+--- AVAILABLE STUDENTS (Sample) ---
+[
+  {
+    "display_name": "KAMESH D",
+    "person_type": "student",
+    "department_code": "MZ",
+    "admission_year": 2023,
+    "track": "core"
+  },
+  {
+    "display_name": "DEVI SUBRAMANI",
+    "person_type": "student",
+    "department_code": "BT",
+    "admission_year": 2023,
+    "track": "core"
+  },
+  {
+    "display_name": "SATHIK MANSUR B",
+    "person_type": "student",
+    "department_code": "MZ",
+    "admission_year": 2023,
+    "track": null
+  },
+  {
+    "display_name": "CHANDRA ATHITHYA M",
+    "person_type": "student",
+    "department_code": "MZ",
+    "admission_year": 2023,
+    "track": null
+  },
+  {
+    "display_name": "PREETI M G",
+    "person_type": "student",
+    "department_code": "BT",
+    "admission_year": 2023,
+    "track": null
+  },
+  {
+    "display_name": "SRINIKKESH R K",
+    "person_type": "student",
+    "department_code": "BT",
+    "admission_year": 2023,
+    "track": null
+  },
+  {
+    "display_name": "KARTHIK V",
+    "person_type": "student",
+    "department_code": "MZ",
+    "admission_year": 2023,
+    "track": "core"
+  },
+  {
+    "display_name": "MEROSAN P",
+    "person_type": "student",
+    "department_code": "SE",
+    "admission_year": 2023,
+    "track": null
+  }
+]

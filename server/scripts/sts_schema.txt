@@ -1,0 +1,6 @@
+id
+person_id
+track
+academic_year
+semester
+selected_at

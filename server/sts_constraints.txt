@@ -1,0 +1,2 @@
+student_track_selections_semester_check: CHECK ((semester = ANY (ARRAY[1, 2])))
+student_track_selections_track_check: CHECK (((track)::text = ANY ((ARRAY['core'::character varying, 'it_core'::character varying, 'premium'::character varying])::text[])))

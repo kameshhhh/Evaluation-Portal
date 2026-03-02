@@ -1,0 +1,46 @@
+[dotenv@17.2.4] injecting env (18) from .env -- tip: ≡ƒöÉ prevent committing .env to code: https://dotenvx.com/precommit
+Starting diagnostic for testAutoAssign...
+2026-02-19 13:53:42 [[34mdebug[39m]: New database connection established in pool {"service":"bitsathy-auth"}
+Context: yr=2026, sem=1, adminId=22fb714d-441a-40c6-b89b-30851dc986ca, sessionId=c1219b88-1d63-4a2e-a644-aafb4d8f01ca
+Total students in year/sem: 6
+Admin scopes found: 0
+Scoped students: 6
+Processing student: KAMESH D (cfe3ab9c-d929-4ff1-950a-c0f42edde15c)
+  - Using sessionId: c1219b88-1d63-4a2e-a644-aafb4d8f01ca
+2026-02-19 13:53:43 [[34mdebug[39m]: New database connection established in pool {"service":"bitsathy-auth"}
+2026-02-19 13:53:43 [[34mdebug[39m]: Query executed {"service":"bitsathy-auth","query":"SELECT p.person_id, p.department_code, sts.track \n         FROM persons p\n         LEFT JOIN student","duration":"70ms","rows":1}
+2026-02-19 13:53:43 [[34mdebug[39m]: Query executed {"service":"bitsathy-auth","query":"SELECT spa.faculty_id, COALESCE(jcm.credibility_score, 1.0) as score\n         FROM session_planner_a","duration":"7ms","rows":2}
+2026-02-19 13:53:43 [[34mdebug[39m]: Query executed {"service":"bitsathy-auth","query":"SELECT \n            p.person_id, p.display_name, \n            COALESCE(jcm.credibility_score, 1.0) a","duration":"13ms","rows":0}
+  - Suggestions found: 0
+Processing student: DEVI SUBRAMANI (6e76c5eb-08ae-44d5-8eeb-0a3ec53212f0)
+  - Using sessionId: c1219b88-1d63-4a2e-a644-aafb4d8f01ca
+2026-02-19 13:53:43 [[34mdebug[39m]: Query executed {"service":"bitsathy-auth","query":"SELECT p.person_id, p.department_code, sts.track \n         FROM persons p\n         LEFT JOIN student","duration":"1ms","rows":1}
+2026-02-19 13:53:43 [[34mdebug[39m]: Query executed {"service":"bitsathy-auth","query":"SELECT spa.faculty_id, COALESCE(jcm.credibility_score, 1.0) as score\n         FROM session_planner_a","duration":"1ms","rows":2}
+2026-02-19 13:53:43 [[34mdebug[39m]: Query executed {"service":"bitsathy-auth","query":"SELECT \n            p.person_id, p.display_name, \n            COALESCE(jcm.credibility_score, 1.0) a","duration":"3ms","rows":0}
+  - Suggestions found: 0
+Processing student: SATHIK MANSUR B (c2bdc535-1d40-4bfa-b5db-e4dda3d1bbb6)
+  - Using sessionId: c1219b88-1d63-4a2e-a644-aafb4d8f01ca
+2026-02-19 13:53:43 [[34mdebug[39m]: Query executed {"service":"bitsathy-auth","query":"SELECT p.person_id, p.department_code, sts.track \n         FROM persons p\n         LEFT JOIN student","duration":"1ms","rows":1}
+2026-02-19 13:53:43 [[34mdebug[39m]: Query executed {"service":"bitsathy-auth","query":"SELECT spa.faculty_id, COALESCE(jcm.credibility_score, 1.0) as score\n         FROM session_planner_a","duration":"0ms","rows":2}
+2026-02-19 13:53:43 [[34mdebug[39m]: Query executed {"service":"bitsathy-auth","query":"SELECT \n            p.person_id, p.display_name, \n            COALESCE(jcm.credibility_score, 1.0) a","duration":"2ms","rows":0}
+  - Suggestions found: 0
+Processing student: KARTHIK V (01e68058-7efd-4cdb-b788-51df18859b96)
+  - Using sessionId: c1219b88-1d63-4a2e-a644-aafb4d8f01ca
+2026-02-19 13:53:43 [[34mdebug[39m]: Query executed {"service":"bitsathy-auth","query":"SELECT p.person_id, p.department_code, sts.track \n         FROM persons p\n         LEFT JOIN student","duration":"1ms","rows":1}
+2026-02-19 13:53:43 [[34mdebug[39m]: Query executed {"service":"bitsathy-auth","query":"SELECT spa.faculty_id, COALESCE(jcm.credibility_score, 1.0) as score\n         FROM session_planner_a","duration":"1ms","rows":2}
+2026-02-19 13:53:43 [[34mdebug[39m]: Query executed {"service":"bitsathy-auth","query":"SELECT \n            p.person_id, p.display_name, \n            COALESCE(jcm.credibility_score, 1.0) a","duration":"2ms","rows":0}
+  - Suggestions found: 0
+Processing student: ASHWIN R (c774d592-3127-4fce-8b8f-896b066eefc4)
+  - Using sessionId: c1219b88-1d63-4a2e-a644-aafb4d8f01ca
+2026-02-19 13:53:43 [[34mdebug[39m]: Query executed {"service":"bitsathy-auth","query":"SELECT p.person_id, p.department_code, sts.track \n         FROM persons p\n         LEFT JOIN student","duration":"0ms","rows":1}
+2026-02-19 13:53:43 [[34mdebug[39m]: Query executed {"service":"bitsathy-auth","query":"SELECT spa.faculty_id, COALESCE(jcm.credibility_score, 1.0) as score\n         FROM session_planner_a","duration":"1ms","rows":2}
+2026-02-19 13:53:43 [[34mdebug[39m]: Query executed {"service":"bitsathy-auth","query":"SELECT \n            p.person_id, p.display_name, \n            COALESCE(jcm.credibility_score, 1.0) a","duration":"2ms","rows":0}
+  - Suggestions found: 0
+Processing student: BHARATH A S (23119640-e006-4b84-b080-64fd482012db)
+  - Using sessionId: c1219b88-1d63-4a2e-a644-aafb4d8f01ca
+2026-02-19 13:53:43 [[34mdebug[39m]: Query executed {"service":"bitsathy-auth","query":"SELECT p.person_id, p.department_code, sts.track \n         FROM persons p\n         LEFT JOIN student","duration":"1ms","rows":1}
+2026-02-19 13:53:43 [[34mdebug[39m]: Query executed {"service":"bitsathy-auth","query":"SELECT spa.faculty_id, COALESCE(jcm.credibility_score, 1.0) as score\n         FROM session_planner_a","duration":"0ms","rows":2}
+2026-02-19 13:53:43 [[34mdebug[39m]: Query executed {"service":"bitsathy-auth","query":"SELECT \n            p.person_id, p.display_name, \n            COALESCE(jcm.credibility_score, 1.0) a","duration":"2ms","rows":0}
+  - Suggestions found: 0
+SUCCESS: Assigned 0 students.
+EMIT to admin: planner:update { count: 0 }

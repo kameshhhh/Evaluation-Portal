@@ -1,0 +1,95 @@
+[dotenv@17.2.4] injecting env (18) from .env -- tip: ≡ƒöÉ encrypt with Dotenvx: https://dotenvx.com
+2026-02-20 16:10:53 [[34mdebug[39m]: New database connection established in pool {"service":"bitsathy-auth"}
+Faculty ID: 355ce028-6e19-4fe2-8b01-32110c8ad4d9
+Session Window: {
+  title: 'Mar S1 - 3rd Year',
+  session_week_start: 2026-02-14T18:30:00.000Z,
+  session_week_end: 2026-02-21T18:30:00.000Z
+}
+Assignments for Faculty: [
+  {
+    student_id: 'cfe3ab9c-d929-4ff1-950a-c0f42edde15c',
+    display_name: 'KAMESH D',
+    status: 'assigned',
+    assignment_source: 'test_auto'
+  },
+  {
+    student_id: '6e76c5eb-08ae-44d5-8eeb-0a3ec53212f0',
+    display_name: 'DEVI SUBRAMANI',
+    status: 'assigned',
+    assignment_source: 'test_auto'
+  },
+  {
+    student_id: 'c2bdc535-1d40-4bfa-b5db-e4dda3d1bbb6',
+    display_name: 'SATHIK MANSUR B',
+    status: 'assigned',
+    assignment_source: 'test_auto'
+  },
+  {
+    student_id: '01e68058-7efd-4cdb-b788-51df18859b96',
+    display_name: 'KARTHIK V',
+    status: 'assigned',
+    assignment_source: 'test_auto'
+  },
+  {
+    student_id: 'c774d592-3127-4fce-8b8f-896b066eefc4',
+    display_name: 'ASHWIN R',
+    status: 'assigned',
+    assignment_source: 'test_auto'
+  },
+  {
+    student_id: '23119640-e006-4b84-b080-64fd482012db',
+    display_name: 'BHARATH A S',
+    status: 'assigned',
+    assignment_source: 'test_auto'
+  }
+]
+Student Assignment Status: [
+  {
+    person_id: 'cfe3ab9c-d929-4ff1-950a-c0f42edde15c',
+    display_name: 'KAMESH D',
+    faculty_id: 'e60d7a69-80c7-4ad1-837b-6724339baa0d',
+    faculty_name: 'HARISH P'
+  },
+  {
+    person_id: 'cfe3ab9c-d929-4ff1-950a-c0f42edde15c',
+    display_name: 'KAMESH D',
+    faculty_id: '355ce028-6e19-4fe2-8b01-32110c8ad4d9',
+    faculty_name: 'KAVIN KUMAR E D'
+  },
+  {
+    person_id: '6e76c5eb-08ae-44d5-8eeb-0a3ec53212f0',
+    display_name: 'DEVI SUBRAMANI',
+    faculty_id: 'e60d7a69-80c7-4ad1-837b-6724339baa0d',
+    faculty_name: 'HARISH P'
+  },
+  {
+    person_id: '6e76c5eb-08ae-44d5-8eeb-0a3ec53212f0',
+    display_name: 'DEVI SUBRAMANI',
+    faculty_id: '355ce028-6e19-4fe2-8b01-32110c8ad4d9',
+    faculty_name: 'KAVIN KUMAR E D'
+  },
+  {
+    person_id: '01e68058-7efd-4cdb-b788-51df18859b96',
+    display_name: 'KARTHIK V',
+    faculty_id: 'e60d7a69-80c7-4ad1-837b-6724339baa0d',
+    faculty_name: 'HARISH P'
+  },
+  {
+    person_id: '01e68058-7efd-4cdb-b788-51df18859b96',
+    display_name: 'KARTHIK V',
+    faculty_id: '355ce028-6e19-4fe2-8b01-32110c8ad4d9',
+    faculty_name: 'KAVIN KUMAR E D'
+  }
+]
+Table evaluation_schedules columns: [
+  'id',
+  'session_id',
+  'faculty_id',
+  'student_id',
+  'scheduled_date',
+  'scheduled_time',
+  'venue',
+  'created_at',
+  'updated_at'
+]

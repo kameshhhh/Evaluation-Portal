@@ -1,0 +1,63 @@
+[dotenv@17.2.4] injecting env (18) from .env -- tip: ΓÜÖ∩╕Å  suppress all logs with { quiet: true }
+2026-02-20 10:04:29 [[34mdebug[39m]: New database connection established in pool {"service":"bitsathy-auth"}
+2026-02-20 10:04:29 [[34mdebug[39m]: New database connection established in pool {"service":"bitsathy-auth"}
+2026-02-20 10:04:29 [[34mdebug[39m]: New database connection established in pool {"service":"bitsathy-auth"}
+2026-02-20 10:04:29 [[34mdebug[39m]: New database connection established in pool {"service":"bitsathy-auth"}
+2026-02-20 10:04:29 [[34mdebug[39m]: New database connection established in pool {"service":"bitsathy-auth"}
+2026-02-20 10:04:29 [[34mdebug[39m]: New database connection established in pool {"service":"bitsathy-auth"}
+2026-02-20 10:04:29 [[34mdebug[39m]: New database connection established in pool {"service":"bitsathy-auth"}
+2026-02-20 10:04:29 [[34mdebug[39m]: New database connection established in pool {"service":"bitsathy-auth"}
+2026-02-20 10:04:29 [[34mdebug[39m]: New database connection established in pool {"service":"bitsathy-auth"}
+2026-02-20 10:04:29 [[34mdebug[39m]: New database connection established in pool {"service":"bitsathy-auth"}
+2026-02-20 10:04:29 [[34mdebug[39m]: New database connection established in pool {"service":"bitsathy-auth"}
+2026-02-20 10:04:29 [[34mdebug[39m]: New database connection established in pool {"service":"bitsathy-auth"}
+[
+  {
+    "table": "evaluation_sessions",
+    "count": "0"
+  },
+  {
+    "table": "faculty_evaluation_sessions",
+    "count": "1"
+  },
+  {
+    "table": "projects",
+    "count": "2"
+  },
+  {
+    "table": "team_formation_requests",
+    "count": "2"
+  },
+  {
+    "table": "team_invitations",
+    "count": "4"
+  },
+  {
+    "table": "session_planner_assignments",
+    "count": "12"
+  },
+  {
+    "table": "faculty_evaluation_allocations",
+    "count": "0"
+  },
+  {
+    "table": "evaluation_schedules",
+    "count": "0"
+  },
+  {
+    "table": "final_student_results",
+    "count": "0"
+  },
+  {
+    "table": "evaluator_profiles",
+    "count": "1"
+  },
+  {
+    "table": "judge_credibility_metrics",
+    "count": "0"
+  },
+  {
+    "table": "governance_audit_logs",
+    "count": "0"
+  }
+]

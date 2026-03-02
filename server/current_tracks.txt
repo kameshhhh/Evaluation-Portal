@@ -1,0 +1,40 @@
+[dotenv@17.2.4] injecting env (18) from .env -- tip: ≡ƒæÑ sync secrets across teammates & machines: https://dotenvx.com/ops
+2026-02-19 13:56:47 [[34mdebug[39m]: New database connection established in pool {"service":"bitsathy-auth"}
+[
+  {
+    "id": 1,
+    "name": "CORE",
+    "description": "Standard evaluation track with team size 3-4",
+    "created_at": "2026-02-18T03:31:37.246Z"
+  },
+  {
+    "id": 2,
+    "name": "IT",
+    "description": "IT-specific evaluation track for individual assessments",
+    "created_at": "2026-02-18T03:31:37.246Z"
+  },
+  {
+    "id": 3,
+    "name": "PREMIUM",
+    "description": "High-stakes evaluation track with team size 1-2",
+    "created_at": "2026-02-18T03:31:37.246Z"
+  },
+  {
+    "id": 37,
+    "name": "core",
+    "description": "Standard",
+    "created_at": "2026-02-18T04:35:06.045Z"
+  },
+  {
+    "id": 38,
+    "name": "it_core",
+    "description": "IT Track",
+    "created_at": "2026-02-18T04:35:06.045Z"
+  },
+  {
+    "id": 39,
+    "name": "premium",
+    "description": "Premium Track",
+    "created_at": "2026-02-18T04:35:06.045Z"
+  }
+]

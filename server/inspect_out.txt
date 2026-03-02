@@ -1,0 +1,29 @@
+--- 1. Search for function 'check_faculty_scope_overlap' ---
+[]
+
+--- 2. Triggers on faculty_evaluation_scope ---
+[]
+
+--- 3. Constraints on faculty_evaluation_scope ---
+[
+  {
+    "conname": "faculty_evaluation_scope_faculty_id_not_null",
+    "contype": "n",
+    "pg_get_constraintdef": "NOT NULL faculty_id"
+  },
+  {
+    "conname": "faculty_evaluation_scope_id_not_null",
+    "contype": "n",
+    "pg_get_constraintdef": "NOT NULL id"
+  },
+  {
+    "conname": "faculty_evaluation_scope_pkey",
+    "contype": "p",
+    "pg_get_constraintdef": "PRIMARY KEY (id)"
+  },
+  {
+    "conname": "faculty_evaluation_scope_track_id_not_null",
+    "contype": "n",
+    "pg_get_constraintdef": "NOT NULL track_id"
+  }
+]

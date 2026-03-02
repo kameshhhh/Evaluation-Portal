@@ -1,0 +1,25 @@
+[dotenv@17.2.4] injecting env (18) from .env -- tip: ≡ƒöæ add access controls to secrets: https://dotenvx.com/ops
+--- SESSIONS track_id usage ---
+2026-02-19 13:57:44 [[34mdebug[39m]: New database connection established in pool {"service":"bitsathy-auth"}
+error: column "track_id" does not exist
+    at D:\Project\prj1AI\server\node_modules\pg-pool\index.js:45:11
+    at process.processTicksAndRejections (node:internal/process/task_queues:103:5)
+    at async checkUsage (D:\Project\prj1AI\server\check_track_usage.js:6:25) {
+  length: 107,
+  severity: 'ERROR',
+  code: '42703',
+  detail: undefined,
+  hint: undefined,
+  position: '8',
+  internalPosition: undefined,
+  internalQuery: undefined,
+  where: undefined,
+  schema: undefined,
+  table: undefined,
+  column: undefined,
+  dataType: undefined,
+  constraint: undefined,
+  file: 'parse_relation.c',
+  line: '3827',
+  routine: 'errorMissingColumn'
+}

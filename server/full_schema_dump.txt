@@ -1,0 +1,18 @@
+[dotenv@17.2.4] injecting env (18) from .env -- tip: ΓÜÖ∩╕Å  override existing env vars with { override: true }
+2026-02-19 13:44:15 [[34mdebug[39m]: New database connection established in pool {"service":"bitsathy-auth"}
+TABLE: session_planner_assignments
+  id: uuid
+  session_id: uuid
+  faculty_id: uuid
+  student_id: uuid
+  project_id: uuid
+  assigned_by: uuid
+  status: character varying
+  faculty_evaluated_at: timestamp with time zone
+  student_feedback_at: timestamp with time zone
+  created_at: timestamp with time zone
+  updated_at: timestamp with time zone
+  marks: integer
+  feedback: text
+  marks_submitted_at: timestamp with time zone
+  assignment_source: character varying

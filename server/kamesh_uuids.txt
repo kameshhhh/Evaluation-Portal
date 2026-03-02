@@ -1,0 +1,14 @@
+[dotenv@17.2.4] injecting env (18) from .env -- tip: ≡ƒöä add secrets lifecycle management: https://dotenvx.com/ops
+2026-02-19 13:48:34 [[34mdebug[39m]: New database connection established in pool {"service":"bitsathy-auth"}
+[
+  {
+    "person_id": "cfe3ab9c-d929-4ff1-950a-c0f42edde15c",
+    "identity_id": "6f51981c-a6e7-4bed-b736-e81c479f1aa5",
+    "display_name": "KAMESH D"
+  },
+  {
+    "person_id": "7acb25d1-440b-4adb-9bc2-c5535051fbee",
+    "identity_id": "22fb714d-441a-40c6-b89b-30851dc986ca",
+    "display_name": "Kameshdurai205"
+  }
+]

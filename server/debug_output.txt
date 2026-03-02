@@ -1,0 +1,24 @@
+[dotenv@17.2.4] injecting env (18) from .env -- tip: ≡ƒùé∩╕Å backup and recover secrets: https://dotenvx.com/ops
+--- SESSION CONFIG ---
+2026-02-20 12:04:00 [[34mdebug[39m]: New database connection established in pool {"service":"bitsathy-auth"}
+SESSION: {
+  "id": "f30bc9b2-f10c-41a1-9cd2-e703421fd2d4",
+  "academic_year": 2026,
+  "semester": 6,
+  "auto_suggested": false
+}
+
+--- STUDENT POOL (Global) ---
+GLOBAL POOL: [
+  {
+    "academic_year": 2026,
+    "semester": 1,
+    "count": "6"
+  }
+]
+
+--- MATCHING STUDENTS ---
+Found 0 students matching Year: 2026, Sem: 6
+Wait! Let me check partial matches...
+Students in Year 2026: 6
+Students in Sem 6: 0

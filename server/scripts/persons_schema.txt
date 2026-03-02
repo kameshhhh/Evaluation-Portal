@@ -1,0 +1,14 @@
+person_id
+identity_id
+person_type
+status
+admission_year
+department_code
+graduation_year
+display_name
+created_at
+created_by
+updated_at
+updated_by
+version
+is_deleted

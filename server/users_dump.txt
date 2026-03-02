@@ -1,0 +1,80 @@
+[
+  {
+    "normalized_email": "harishp.mz23@bitsathy.ac.in",
+    "len": 27,
+    "user_role": "faculty",
+    "internal_user_id": "94b3fe5e-dd38-4098-a40b-a9444f8c48ab"
+  },
+  {
+    "normalized_email": "merosan.se23@bitsathy.ac.in",
+    "len": 27,
+    "user_role": "student",
+    "internal_user_id": "642c3b13-0589-4c88-9677-4ba125a42692"
+  },
+  {
+    "normalized_email": "chandraathithya.mz23@bitsathy.ac.in",
+    "len": 35,
+    "user_role": "student",
+    "internal_user_id": "6266e69c-da16-4de3-bd7d-fb4bdc85406a"
+  },
+  {
+    "normalized_email": "preeti.bt23@bitsathy.ac.in",
+    "len": 26,
+    "user_role": "student",
+    "internal_user_id": "297da42a-9ef6-47ee-a986-b55faafec9c4"
+  },
+  {
+    "normalized_email": "srinikkesh.bt23@bitsathy.ac.in",
+    "len": 30,
+    "user_role": "student",
+    "internal_user_id": "0afbef2d-e7ee-4ab0-96b1-dec88633cc87"
+  },
+  {
+    "normalized_email": "devi.bt23@bitsathy.ac.in",
+    "len": 24,
+    "user_role": "student",
+    "internal_user_id": "07227094-a09e-4633-8aa7-b42d0e69a9f2"
+  },
+  {
+    "normalized_email": "karthikv.mz23@bitsathy.ac.in",
+    "len": 28,
+    "user_role": "student",
+    "internal_user_id": "90998010-b999-4a53-84ee-88d107324d91"
+  },
+  {
+    "normalized_email": "ashwin.me23@bitsathy.ac.in",
+    "len": 26,
+    "user_role": "student",
+    "internal_user_id": "d93d864f-c0a3-4146-88de-4295cdd20e6d"
+  },
+  {
+    "normalized_email": "sathikmansurb.mz23@bitsathy.ac.in",
+    "len": 33,
+    "user_role": "student",
+    "internal_user_id": "a71edd1e-9b20-474b-9643-d8406410471f"
+  },
+  {
+    "normalized_email": "kamesh.mz23@bitsathy.ac.in",
+    "len": 26,
+    "user_role": "student",
+    "internal_user_id": "6f51981c-a6e7-4bed-b736-e81c479f1aa5"
+  },
+  {
+    "normalized_email": "kavinkumared.mz23@bitsathy.ac.in",
+    "len": 32,
+    "user_role": "faculty",
+    "internal_user_id": "ae4c5845-935a-4f35-adba-73149773bfdc"
+  },
+  {
+    "normalized_email": "kameshdurai205@gmail.com",
+    "len": 24,
+    "user_role": "admin",
+    "internal_user_id": "22fb714d-441a-40c6-b89b-30851dc986ca"
+  },
+  {
+    "normalized_email": "bharath.me23@bitsathy.ac.in",
+    "len": 27,
+    "user_role": "student",
+    "internal_user_id": "ef9da1ff-ae75-412c-931a-ce1281935432"
+  }
+]

@@ -1,0 +1,38 @@
+[
+  {
+    "column_name": "id",
+    "data_type": "uuid"
+  },
+  {
+    "column_name": "faculty_id",
+    "data_type": "uuid"
+  },
+  {
+    "column_name": "track_id",
+    "data_type": "integer"
+  },
+  {
+    "column_name": "department_code",
+    "data_type": "character varying"
+  },
+  {
+    "column_name": "is_active",
+    "data_type": "boolean"
+  },
+  {
+    "column_name": "scope_version",
+    "data_type": "uuid"
+  },
+  {
+    "column_name": "created_at",
+    "data_type": "timestamp with time zone"
+  },
+  {
+    "column_name": "updated_at",
+    "data_type": "timestamp with time zone"
+  },
+  {
+    "column_name": "created_by",
+    "data_type": "uuid"
+  }
+]
