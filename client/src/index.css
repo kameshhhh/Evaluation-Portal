@@ -1,0 +1,192 @@
+/* ============================================================ */
+/* TAILWIND CSS — Base, Components, Utilities Imports            */
+/* ============================================================ */
+/* These three directives inject Tailwind's generated styles.    */
+/* @tailwind base — Preflight reset + CSS custom properties      */
+/* @tailwind components — Component-level utility classes         */
+/* @tailwind utilities — All utility classes (flex, p-4, etc.)   */
+/* ============================================================ */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ============================================================ */
+/* GLOBAL STYLES — App-wide base styles                          */
+/* ============================================================ */
+
+body {
+  margin: 0;
+  font-family:
+    "Inter",
+    -apple-system,
+    BlinkMacSystemFont,
+    "Segoe UI",
+    "Roboto",
+    "Oxygen",
+    "Ubuntu",
+    "Cantarell",
+    "Fira Sans",
+    "Droid Sans",
+    "Helvetica Neue",
+    sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+code {
+  font-family:
+    source-code-pro, Menlo, Monaco, Consolas, "Courier New", monospace;
+}
+
+/* Custom scrollbar styling for modern browsers */
+::-webkit-scrollbar {
+  width: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: #f1f5f9;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+}
+
+/* ============================================================ */
+/* 2026 MODERN DESIGN — Animations & Effects                     */
+/* ============================================================ */
+
+/* Fade slide in animation for cards */
+@keyframes fadeSlideIn {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Subtle pulse for active indicators */
+@keyframes subtlePulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.7;
+  }
+}
+
+/* Shimmer effect for loading states */
+@keyframes shimmer {
+  0% {
+    background-position: -200% 0;
+  }
+  100% {
+    background-position: 200% 0;
+  }
+}
+
+/* Utility class for shimmer loading */
+.shimmer-bg {
+  background: linear-gradient(90deg, #f1f5f9 25%, #e2e8f0 50%, #f1f5f9 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.5s infinite;
+}
+
+/* Glassmorphism utility */
+.glass {
+  background: rgba(255, 255, 255, 0.7);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid rgba(255, 255, 255, 0.3);
+}
+
+/* Smooth hover lift effect */
+.hover-lift {
+  transition:
+    transform 0.3s ease,
+    box-shadow 0.3s ease;
+}
+
+.hover-lift:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.08);
+}
+
+/* ============================================================ */
+/* SESSION PROGRESS BAR — A-07 Animations & Effects              */
+/* SRS §4.1.3: Visual scarcity pool feedback                     */
+/* ============================================================ */
+
+/* Progress bar completion pulse animation */
+@keyframes progressCompletePulse {
+  0%,
+  100% {
+    opacity: 1;
+    box-shadow: 0 0 0 0 rgba(22, 163, 74, 0.4);
+  }
+  50% {
+    opacity: 0.9;
+    box-shadow: 0 0 0 4px rgba(22, 163, 74, 0);
+  }
+}
+
+/* Apply pulse to completed progress bars */
+.progress-complete {
+  animation: progressCompletePulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+/* Confetti falling animation */
+@keyframes confettiFall {
+  0% {
+    transform: translateY(-10px) rotate(0deg);
+    opacity: 1;
+  }
+  100% {
+    transform: translateY(100px) rotate(360deg);
+    opacity: 0;
+  }
+}
+
+.confetti {
+  position: absolute;
+  animation: confettiFall 3s ease-out forwards;
+}
+
+/* Smooth width transitions for progress bar fill */
+.progress-bar-fill {
+  transition: width 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* Celebration bounce animation (used by celebration banner) */
+@keyframes celebrateBounce {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-3px);
+  }
+}
+
+.animate-celebrate {
+  animation: celebrateBounce 0.5s ease-in-out 3;
+}
+
+/* Accessibility — Reduced motion support */
+@media (prefers-reduced-motion: reduce) {
+  .progress-bar-fill,
+  .progress-complete,
+  .confetti,
+  .animate-celebrate {
+    animation: none !important;
+    transition: none !important;
+  }
+}

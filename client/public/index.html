@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <link rel="icon" href="%PUBLIC_URL%/favicon.ico" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, maximum-scale=5.0, user-scalable=yes"
+    />
+    <!-- Theme color — matches the app's violet accent -->
+    <meta name="theme-color" content="#7C3AED" />
+    <!-- SEO description -->
+    <meta
+      name="description"
+      content="BITSathy Auth — Zero-Trust Identity-First Google Login System"
+    />
+    <!-- Content Security Policy removed — CRA injects inline scripts that
+         require 'unsafe-inline' / 'unsafe-eval'. CSP is better enforced via
+         the server's Helmet middleware (securityHeaders.js) which is already
+         configured with the correct policy for production. -->
+    <link rel="apple-touch-icon" href="%PUBLIC_URL%/logo192.png" />
+    <link rel="manifest" href="%PUBLIC_URL%/manifest.json" />
+
+    <!-- ========== EXTERNAL CDN RESOURCES ========== -->
+
+    <!-- Bootstrap Icons — icon font loaded from jsDelivr CDN -->
+    <link
+      rel="stylesheet"
+      href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.13.1/font/bootstrap-icons.min.css"
+      crossorigin="anonymous"
+    />
+
+    <!-- Google Fonts — Inter for clean UI typography -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+
+    <!-- Google Identity Services — required for Google One-Tap sign-in -->
+    <!-- This script is loaded here to ensure it's available before React mounts -->
+    <script src="https://accounts.google.com/gsi/client" async defer></script>
+
+    <title>BITSathy Auth — Zero-Trust Login</title>
+  </head>
+  <body>
+    <noscript>You need to enable JavaScript to run this app.</noscript>
+    <!-- React root mount point -->
+    <div id="root"></div>
+
+    <!-- Cloudflare Browser Insights — performance and security analytics -->
+    <!-- Replace the token with your actual Cloudflare Web Analytics token -->
+    <script
+      defer
+      src="https://static.cloudflareinsights.com/beacon.min.js"
+      data-cf-beacon='{"token": "your-cloudflare-token-here"}'
+    ></script>
+  </body>
+</html>
