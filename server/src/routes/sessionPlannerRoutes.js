@@ -49,6 +49,10 @@ const {
   resetTestAssignments,
   suggestEvaluators,
   finalizeSessionManual,
+  // Session Groups
+  createSessionGroup,
+  listSessionGroups,
+  getSessionGroupDetail,
 } = require("../controllers/sessionPlannerController");
 
 // ============================================================
@@ -244,6 +248,28 @@ router.get(
   authenticate,
   authorize("student"),
   getMySchedules,
+);
+
+// ============================================================
+// 7. SESSION GROUPS (Admin — Track-Based Parent-Child Sessions)
+// ============================================================
+router.post(
+  "/session-groups",
+  authenticate,
+  authorize("admin"),
+  createSessionGroup,
+);
+router.get(
+  "/session-groups",
+  authenticate,
+  authorize("admin", "faculty"),
+  listSessionGroups,
+);
+router.get(
+  "/session-groups/:groupId",
+  authenticate,
+  authorize("admin", "faculty"),
+  getSessionGroupDetail,
 );
 
 module.exports = router;

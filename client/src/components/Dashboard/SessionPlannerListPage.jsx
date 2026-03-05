@@ -40,7 +40,8 @@ import {
   getMySessions,
   getSessionHistory,
   verifyPlannerPassword,
-  createSession,
+  createSessionGroup,
+  listSessionGroups,
   submitMarks as submitMarksApi,
   setSchedule as setScheduleApi,
 } from "../../services/sessionPlannerApi";
@@ -48,16 +49,7 @@ import {
 // ============================================================
 // HELPERS
 // ============================================================
-const getYearLabel = (admissionYear) => {
-  if (!admissionYear) return null;
-  const currentYear = new Date().getFullYear();
-  const diff = currentYear - admissionYear;
-  if (diff >= 4) return "Final Year";
-  if (diff === 3) return "3rd Year";
-  if (diff === 2) return "2nd Year";
-  if (diff === 1) return "1st Year";
-  return `${admissionYear}`;
-};
+import { getActiveBatches, getBatchYearLabel, getCurrentAcademicYear } from "../../utils/batchHelper";
 
 // SRS §4.1.3 — Scarcity pool: each student = 5 points
 const POINTS_PER_MEMBER = 5;
@@ -117,13 +109,16 @@ const SessionPlannerListPage = () => {
   // Month/Segment/Year dropdowns
   const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
   const SEGMENTS = ["S1", "S2", "S3", "S4"];
-  const YEAR_GROUPS = ["1st Year", "2nd Year", "3rd Year", "Final Year"];
+  const ACTIVE_BATCHES = getActiveBatches(); // [{batchYear, label, chipId}]
   const currentMonth = MONTHS[new Date().getMonth()];
   const [sessionMonth, setSessionMonth] = useState(currentMonth);
   const [sessionSegment, setSessionSegment] = useState("S1");
-  const [sessionYearGroup, setSessionYearGroup] = useState("Final Year");
+  const [selectedBatchYear, setSelectedBatchYear] = useState(ACTIVE_BATCHES[0]?.batchYear || null);
   const [sessionSemester, setSessionSemester] = useState(1);
 
+  // Session groups state
+  const [sessionGroups, setSessionGroups] = useState([]);
+  
   // Filtering for Sessions List
   const [sessionSearch, setSessionSearch] = useState("");
 
@@ -146,10 +141,15 @@ const SessionPlannerListPage = () => {
   const loadHistory = useCallback(async () => {
     try {
       setHistoryLoading(true);
-      const res = await getSessionHistory();
-      setSessionHistory(res.data || []);
+      const [histRes, groupRes] = await Promise.all([
+        getSessionHistory(),
+        listSessionGroups(),
+      ]);
+      setSessionHistory(histRes.data || []);
+      setSessionGroups(groupRes.data || []);
     } catch {
       setSessionHistory([]);
+      setSessionGroups([]);
     } finally {
       setHistoryLoading(false);
     }
@@ -193,24 +193,26 @@ const SessionPlannerListPage = () => {
     try {
       setCreating(true);
       setCreateError("");
-      const sessionTitle = `${sessionMonth} ${sessionSegment} - ${sessionYearGroup}`;
-      const res = await createSession({
-        title: sessionTitle,
+      const res = await createSessionGroup({
         month: sessionMonth,
         segment: sessionSegment,
-        targetYear: sessionYearGroup,
-        academicYear: new Date().getFullYear(),
+        batchYear: selectedBatchYear,
+        targetYear: getBatchYearLabel(selectedBatchYear),
+        academicYear: getCurrentAcademicYear(),
         semester: sessionSemester,
       });
       setShowCreateForm(false);
-      // Navigate to the session planner (new or existing)
-      if (res?.data?.id) {
-        navigate(`/session-planner/${res.data.id}`);
+      // If the group has child sessions, navigate to the first one (core)
+      const sessions = res?.data?.sessions;
+      if (sessions && sessions.length > 0) {
+        // Navigate to core session by default
+        const coreSession = sessions.find(s => s.track === 'core') || sessions[0];
+        navigate(`/session-planner/${coreSession.id}`);
       } else {
         loadHistory();
       }
     } catch (err) {
-      setCreateError(err.response?.data?.error || "Failed to create session");
+      setCreateError(err.response?.data?.error || "Failed to create session group");
     } finally {
       setCreating(false);
     }
@@ -643,23 +645,80 @@ return (
               <div className="flex items-center justify-center py-12">
                 <Loader2 size={24} className="animate-spin text-violet-500" />
               </div>
-            ) : sessionHistory.length === 0 ? (
+            ) : sessionGroups.length === 0 && sessionHistory.length === 0 ? (
               <div className="text-center py-12 rounded-2xl border-2 border-dashed border-gray-200 bg-white/50">
                 <Calendar size={36} className="mx-auto text-gray-300 mb-3" />
                 <p className="text-gray-500 font-medium">
                   No sessions created yet
                 </p>
                 <p className="text-sm text-gray-400 mt-1 max-w-xs mx-auto">
-                  Sessions are created in the Faculty Evaluation tab of Admin
-                  Console. Once created, they will appear here for assignment
-                  management.
+                  Click "Create Session" to create a grouped session with Core, IT&Core, and Premium tracks.
                 </p>
               </div>
             ) : (
-              <div className="space-y-3">
-                {sessionHistory.map((session) => (
-                  <HistoryCard key={session.session_id} session={session} />
+              <div className="space-y-4">
+                {/* Grouped Sessions */}
+                {sessionGroups.map((group) => (
+                  <div key={group.group_id} className="rounded-2xl border border-gray-100 bg-white overflow-hidden shadow-sm">
+                    <div className="px-5 py-3 bg-gradient-to-r from-violet-50 to-indigo-50 border-b border-gray-100">
+                      <p className="text-sm font-bold text-gray-900">{group.title}</p>
+                      <p className="text-xs text-gray-500 mt-0.5">
+                        {group.session_date ? new Date(group.session_date).toLocaleDateString() : ""} · Year {group.academic_year} · Sem {group.semester}
+                      </p>
+                    </div>
+                    <div className="divide-y divide-gray-50">
+                      {(group.sessions || []).map((sess) => {
+                        const TRACK_LABELS = { core: "Core", it_core: "IT & Core", premium: "Premium" };
+                        const TRACK_COLORS = {
+                          core: { bg: "rgba(5,150,105,0.08)", color: "#059669" },
+                          it_core: { bg: "rgba(99,102,241,0.08)", color: "#6366F1" },
+                          premium: { bg: "rgba(217,119,6,0.08)", color: "#D97706" },
+                        };
+                        const trackColor = TRACK_COLORS[sess.track] || TRACK_COLORS.core;
+                        const statusStyle = getStatusStyle(sess.status);
+                        return (
+                          <button
+                            key={sess.id}
+                            onClick={() => openPlanner(sess.id)}
+                            className="w-full flex items-center gap-4 px-5 py-3 text-left hover:bg-gray-50 transition-all group"
+                          >
+                            <span
+                              className="text-[10px] font-bold px-2.5 py-1 rounded-full shrink-0"
+                              style={{ background: trackColor.bg, color: trackColor.color }}
+                            >
+                              {TRACK_LABELS[sess.track] || sess.track}
+                            </span>
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center gap-2">
+                                <p className="text-sm font-medium text-gray-800 truncate">{sess.title}</p>
+                                <span
+                                  className="text-[10px] font-semibold px-2 py-0.5 rounded-full shrink-0"
+                                  style={{ background: statusStyle.bg, color: statusStyle.color }}
+                                >
+                                  {statusStyle.label}
+                                </span>
+                              </div>
+                              <p className="text-xs text-gray-500 mt-0.5">
+                                {sess.facultyCount || 0} faculty · {sess.assignedStudents || 0} students · {sess.totalAssignments || 0} assignments
+                              </p>
+                            </div>
+                            <ChevronRight
+                              size={16}
+                              className="text-gray-300 group-hover:text-violet-500 transition-colors shrink-0"
+                            />
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
                 ))}
+
+                {/* Ungrouped Sessions (legacy) */}
+                {sessionHistory
+                  .filter(s => !s.group_id)
+                  .map((session) => (
+                    <HistoryCard key={session.session_id} session={session} />
+                  ))}
               </div>
             )}
           </section>
@@ -732,23 +791,26 @@ return (
                 </div>
               </div>
 
-              {/* Year Group */}
+              {/* Batch Year */}
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Year
+                  Target Batch
                 </label>
                 <div className="grid grid-cols-4 gap-2">
-                  {YEAR_GROUPS.map(yg => (
+                  {ACTIVE_BATCHES.map(b => (
                     <button
-                      key={yg}
+                      key={b.batchYear}
                       type="button"
-                      onClick={() => setSessionYearGroup(yg)}
-                      className={`px-3 py-2.5 rounded-xl text-sm font-semibold border transition-all ${sessionYearGroup === yg
+                      onClick={() => setSelectedBatchYear(b.batchYear)}
+                      className={`px-3 py-2.5 rounded-xl text-sm font-semibold border transition-all ${selectedBatchYear === b.batchYear
                         ? "bg-violet-600 text-white border-violet-600 shadow-md"
                         : "bg-white text-gray-600 border-gray-200 hover:border-violet-300"
                         }`}
                     >
-                      {yg}
+                      <span className="block text-xs font-bold">{b.batchYear}</span>
+                      <span className="block text-[10px] font-normal mt-0.5 opacity-70">
+                        {b.label}
+                      </span>
                     </button>
                   ))}
                 </div>
@@ -779,13 +841,19 @@ return (
 
               {/* Preview */}
               <div className="bg-violet-50 p-3 rounded-xl border border-violet-100">
-                <p className="text-xs text-violet-600 font-medium mb-1">Session Name Preview:</p>
+                <p className="text-xs text-violet-600 font-medium mb-1">Session Group Preview:</p>
                 <p className="text-sm font-bold text-violet-800">
-                  {sessionMonth} {sessionSegment} - {sessionYearGroup}
+                  {sessionMonth} {sessionSegment} - Batch {selectedBatchYear} ({getBatchYearLabel(selectedBatchYear) || "?"})
                 </p>
                 <p className="text-[10px] text-violet-500 mt-1">
                   Week {sessionSegment.replace("S", "")} of {sessionMonth} {new Date().getFullYear()} • Semester {sessionSemester}
                 </p>
+                <div className="flex gap-2 mt-2">
+                  <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-green-50 text-green-700">Core</span>
+                  <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-indigo-50 text-indigo-700">IT & Core</span>
+                  <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-amber-50 text-amber-700">Premium</span>
+                </div>
+                <p className="text-[10px] text-violet-400 mt-1">3 track-specific sub-sessions will be created</p>
               </div>
 
               {/* Scarcity Info */}

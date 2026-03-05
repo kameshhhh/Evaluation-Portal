@@ -43,7 +43,7 @@ const Navbar = () => {
       }}
     >
       {/* Mobile: Compact header | Desktop: Full header */}
-      <div className="max-w-6xl mx-auto px-4 sm:px-8 md:px-12 lg:px-16">
+      <div className="w-full mx-auto px-4 sm:px-6">
         <div className="flex items-center justify-between h-14 sm:h-16">
           {/* Left section — Logo */}
           <Link

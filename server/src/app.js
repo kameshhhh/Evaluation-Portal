@@ -93,6 +93,18 @@ const facultyScopeRoutes = require("./routes/facultyScopeRoutes");
 // SRS §4.1.4 — Rubric-Based Distribution
 const rubricRoutes = require("./routes/rubricRoutes");
 
+// Session Report — Admin session insights & evaluation reporting
+const sessionReportRoutes = require("./routes/sessionReportRoutes");
+
+// Appeals — Student score appeal workflow
+const appealsRoutes = require("./routes/appealsRoutes");
+
+// Alerts — Faculty anomaly detection alerts
+const alertsRoutes = require("./routes/alertsRoutes");
+
+// Admin Management — Session delete & credibility reset
+const adminManagementRoutes = require("./routes/adminManagementRoutes");
+
 // Import logger for HTTP request logging
 const logger = require("./utils/logger");
 
@@ -325,6 +337,26 @@ app.use("/api/faculty-scope", facultyScopeRoutes);
 // Write ops (attach) require admin role.
 // ============================================================
 app.use("/api/rubrics", rubricRoutes);
+
+// ============================================================
+// SESSION REPORT — Admin session insights & evaluation reporting
+// ============================================================
+app.use("/api/session-report", sessionReportRoutes);
+
+// ============================================================
+// APPEALS — Student score appeal workflow
+// ============================================================
+app.use("/api/appeals", appealsRoutes);
+
+// ============================================================
+// ALERTS — Faculty anomaly detection alerts
+// ============================================================
+app.use("/api/alerts", alertsRoutes);
+
+// ============================================================
+// ADMIN MANAGEMENT — Session delete & credibility reset
+// ============================================================
+app.use("/api/admin-manage", adminManagementRoutes);
 
 // ============================================================
 // 404 HANDLER — Catch unmatched routes

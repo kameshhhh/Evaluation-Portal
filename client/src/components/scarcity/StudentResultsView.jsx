@@ -14,6 +14,11 @@ import React, { useState, useEffect, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import api from "../../services/api";
 import {
+  checkAppealEligibility,
+  fileAppeal,
+  getMyAppeals,
+} from "../../services/appealsApi";
+import {
   ArrowLeft,
   Award,
   BarChart3,
@@ -27,6 +32,10 @@ import {
   Calendar,
   Star,
   ChevronRight,
+  MessageSquare,
+  CheckCircle,
+  XCircle,
+  Clock,
 } from "lucide-react";
 
 // ============================================================
@@ -39,6 +48,13 @@ const StudentResultsView = () => {
   const [results, setResults] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+
+  // Appeal state
+  const [myAppeals, setMyAppeals] = useState([]); // appeals already filed
+  const [appealModal, setAppealModal] = useState(null); // sessionId being appealed
+  const [appealReason, setAppealReason] = useState("");
+  const [appealSubmitting, setAppealSubmitting] = useState(false);
+  const [appealError, setAppealError] = useState(null);
 
   // ---------------------------------------------------------
   // FETCH STUDENT'S OWN RESULTS
@@ -54,7 +70,8 @@ const StudentResultsView = () => {
       if (response.data?.success) {
         setResults(response.data.data || []);
       } else {
-        setResults(response.data?.data || response.data || []);
+        setResults([]);
+        setError("Server returned an unsuccessful response.");
       }
     } catch (err) {
       // If 404 or no data, just show empty state
@@ -74,7 +91,59 @@ const StudentResultsView = () => {
 
   useEffect(() => {
     loadResults();
+    // Load any existing appeals
+    getMyAppeals()
+      .then((res) => setMyAppeals(res.data || []))
+      .catch(() => {});
   }, [loadResults]);
+
+  // ---------------------------------------------------------
+  // APPEAL: Check eligibility & submit
+  // ---------------------------------------------------------
+  const handleAppealClick = async (sessionId) => {
+    try {
+      const res = await checkAppealEligibility(sessionId);
+      if (res.data?.eligible) {
+        setAppealModal(sessionId);
+        setAppealReason("");
+        setAppealError(null);
+      } else {
+        alert(res.data?.reasons?.join(' ') || "You are not eligible to file an appeal for this session.");
+      }
+    } catch (err) {
+      alert(err.response?.data?.error || "Could not check appeal eligibility.");
+    }
+  };
+
+  const handleAppealSubmit = async () => {
+    if (!appealReason.trim()) {
+      setAppealError("Please provide a reason for your appeal.");
+      return;
+    }
+    try {
+      setAppealSubmitting(true);
+      setAppealError(null);
+      await fileAppeal(appealModal, appealReason.trim());
+      // Refresh appeals list
+      const res = await getMyAppeals();
+      setMyAppeals(res.data || []);
+      setAppealModal(null);
+      setAppealReason("");
+    } catch (err) {
+      setAppealError(err.response?.data?.error || "Failed to submit appeal.");
+    } finally {
+      setAppealSubmitting(false);
+    }
+  };
+
+  const getAppealForSession = (sessionId) =>
+    myAppeals.find((a) => a.session_id === sessionId);
+
+  const APPEAL_STATUS_BADGE = {
+    pending: { bg: "bg-yellow-100", text: "text-yellow-700", icon: Clock, label: "Appeal Pending" },
+    accepted: { bg: "bg-green-100", text: "text-green-700", icon: CheckCircle, label: "Appeal Approved" },
+    rejected: { bg: "bg-red-100", text: "text-red-700", icon: XCircle, label: "Appeal Rejected" },
+  };
 
   // ---------------------------------------------------------
   // HELPER: Trend indicator
@@ -352,19 +421,94 @@ const StudentResultsView = () => {
                     </div>
                   </div>
 
-                  {/* Date footer */}
-                  {result.windowEnd && (
-                    <div className="flex items-center gap-1 text-[10px] text-gray-400 mt-3">
-                      <Calendar className="h-3 w-3" />
-                      <span>
-                        Completed:{" "}
-                        {new Date(result.windowEnd).toLocaleDateString()}
-                      </span>
-                    </div>
-                  )}
+                  {/* Date footer + Appeal */}
+                  <div className="flex items-center justify-between mt-3">
+                    {result.windowEnd && (
+                      <div className="flex items-center gap-1 text-[10px] text-gray-400">
+                        <Calendar className="h-3 w-3" />
+                        <span>
+                          Completed:{" "}
+                          {new Date(result.windowEnd).toLocaleDateString()}
+                        </span>
+                      </div>
+                    )}
+                    {/* Appeal badge or button */}
+                    {(() => {
+                      const existingAppeal = getAppealForSession(result.sessionId);
+                      if (existingAppeal) {
+                        const badge = APPEAL_STATUS_BADGE[existingAppeal.status] || APPEAL_STATUS_BADGE.pending;
+                        const BadgeIcon = badge.icon;
+                        return (
+                          <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold ${badge.bg} ${badge.text}`}>
+                            <BadgeIcon className="h-3 w-3" />
+                            {badge.label}
+                          </span>
+                        );
+                      }
+                      // Show appeal button only for finalized sessions
+                      if (result.status === "finalized" || result.source !== "live") {
+                        return (
+                          <button
+                            onClick={() => handleAppealClick(result.sessionId)}
+                            className="inline-flex items-center gap-1 px-2.5 py-1 text-[10px] font-medium text-amber-700 bg-amber-50 hover:bg-amber-100 border border-amber-200 rounded-full transition-colors"
+                          >
+                            <MessageSquare className="h-3 w-3" />
+                            Appeal Score
+                          </button>
+                        );
+                      }
+                      return null;
+                    })()}
+                  </div>
                 </div>
               );
             })}
+          </div>
+        )}
+
+        {/* ====================================================== */}
+        {/* APPEAL MODAL */}
+        {/* ====================================================== */}
+        {appealModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
+            <div className="bg-white rounded-2xl shadow-2xl border border-gray-200 w-full max-w-md mx-4 p-6">
+              <h3 className="text-lg font-bold text-gray-900 flex items-center gap-2 mb-1">
+                <MessageSquare className="h-5 w-5 text-amber-500" />
+                Appeal Score
+              </h3>
+              <p className="text-xs text-gray-500 mb-4">
+                Please explain why you believe your evaluation score should be reviewed.
+                Appeals are reviewed by faculty administrators.
+              </p>
+              <textarea
+                value={appealReason}
+                onChange={(e) => setAppealReason(e.target.value)}
+                placeholder="Describe your reason for appealing (minimum 10 characters)..."
+                rows={4}
+                className="w-full border border-gray-300 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400 resize-none"
+              />
+              {appealError && (
+                <p className="text-xs text-red-600 mt-2 flex items-center gap-1">
+                  <AlertCircle className="h-3.5 w-3.5" />
+                  {appealError}
+                </p>
+              )}
+              <div className="flex items-center justify-end gap-2 mt-4">
+                <button
+                  onClick={() => { setAppealModal(null); setAppealError(null); }}
+                  className="px-4 py-2 text-sm text-gray-600 hover:text-gray-800 transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleAppealSubmit}
+                  disabled={appealSubmitting || appealReason.trim().length < 10}
+                  className="px-4 py-2 text-sm font-medium text-white bg-amber-600 hover:bg-amber-700 rounded-xl disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                >
+                  {appealSubmitting ? "Submitting..." : "Submit Appeal"}
+                </button>
+              </div>
+            </div>
           </div>
         )}
       </main>

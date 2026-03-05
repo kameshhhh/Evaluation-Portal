@@ -35,6 +35,7 @@ import {
   respondToInvitation,
   getTrackConfig,
 } from "../../../services/sessionPlannerApi";
+import { getYearLabel, YEAR_BADGE_COLORS } from "../../../utils/yearUtils";
 
 const TRACK_LABELS = {
   core: "Core Project",
@@ -42,23 +43,7 @@ const TRACK_LABELS = {
   premium: "Premium Project",
 };
 
-// Year label from admission_year (22→Final, 23→3rd, 24→2nd, 25→1st)
-const getYearLabel = (admissionYear) => {
-  if (!admissionYear) return null;
-  const yr = new Date().getFullYear() - admissionYear;
-  if (yr >= 4) return "Final year";
-  if (yr === 3) return "3rd year";
-  if (yr === 2) return "2nd year";
-  if (yr === 1) return "1st year";
-  return null;
-};
-
-const YEAR_COLORS = {
-  "Final year": { color: "#DC2626", bg: "rgba(220,38,38,0.08)" },
-  "3rd year":   { color: "#7C3AED", bg: "rgba(124,58,237,0.08)" },
-  "2nd year":   { color: "#2563EB", bg: "rgba(37,99,235,0.08)" },
-  "1st year":   { color: "#059669", bg: "rgba(5,150,105,0.08)" },
-};
+// getYearLabel, YEAR_BADGE_COLORS imported from yearUtils
 
 const STATUS_BADGES = {
   pending: { color: "#D97706", bg: "rgba(217,119,6,0.08)", label: "Pending" },
@@ -525,8 +510,8 @@ const TeamFormationPage = () => {
                             <span
                               className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full"
                               style={{
-                                background: YEAR_COLORS[getYearLabel(s.admission_year)]?.bg || "rgba(107,114,128,0.08)",
-                                color: YEAR_COLORS[getYearLabel(s.admission_year)]?.color || "#6B7280",
+                                background: YEAR_BADGE_COLORS[getYearLabel(s.admission_year)]?.bg || "rgba(107,114,128,0.08)",
+                                color: YEAR_BADGE_COLORS[getYearLabel(s.admission_year)]?.color || "#6B7280",
                               }}
                             >
                               {getYearLabel(s.admission_year)}

@@ -187,7 +187,7 @@ const FacultyDashboard = ({ data: preloadedData, onRefresh }) => {
   // ============================================================
   if (error && !loading) {
     return (
-      <div className="min-h-[calc(100vh-4rem)] px-4 sm:px-8 py-10 sm:py-12">
+      <div className="min-h-[calc(100vh-4rem)] px-4 sm:px-6 py-6 sm:py-8">
         <div className="max-w-md mx-auto pt-10 sm:pt-20">
           <div
             className="
@@ -254,7 +254,7 @@ const FacultyDashboard = ({ data: preloadedData, onRefresh }) => {
   return (
     <div className="min-h-[calc(100vh-4rem)]">
       {/* Mobile-first padding: 16px on mobile, generous on desktop */}
-      <div className="max-w-6xl mx-auto px-4 sm:px-8 lg:px-16 py-6 sm:py-10">
+      <div className="w-full mx-auto px-4 sm:px-6 py-4 sm:py-6">
         {/* ====================================================== */}
         {/* HEADER — Welcome card + Metrics */}
         {/* ====================================================== */}
@@ -273,7 +273,7 @@ const FacultyDashboard = ({ data: preloadedData, onRefresh }) => {
         {/* SESSION PLANNER — Quick access button */}
         {/* ====================================================== */}
         {/* Session Planner — always visible */}
-        <div className="mt-6 sm:mt-8">
+        <div className="mt-4 sm:mt-5">
           <button
             onClick={() => navigate("/session-planner")}
             className="
@@ -310,7 +310,7 @@ const FacultyDashboard = ({ data: preloadedData, onRefresh }) => {
         {/* ====================================================== */}
         {/* SECTION HEADER — Evaluation Sessions */}
         {/* ====================================================== */}
-        <div className="flex items-center justify-between mt-8 sm:mt-10 mb-4 sm:mb-6">
+        <div className="flex items-center justify-between mt-5 sm:mt-6 mb-3 sm:mb-4">
           <h2
             className="text-base sm:text-lg font-semibold tracking-tight"
             style={{ color: "#1E1E1E" }}
@@ -348,7 +348,7 @@ const FacultyDashboard = ({ data: preloadedData, onRefresh }) => {
         {/* ====================================================== */}
         {/* MY RESULTS — Link to faculty evaluation results */}
         {/* ====================================================== */}
-        <div className="mt-6 sm:mt-8">
+        <div className="mt-4 sm:mt-5">
           <button
             onClick={() => navigate("/faculty-results")}
             className="

@@ -309,7 +309,7 @@ const DashboardHeader = ({
   } = stats;
 
   return (
-    <div className="space-y-6 sm:space-y-8">
+    <div className="space-y-4 sm:space-y-5">
       {/* Inject global styles */}
       <style>{globalStyles}</style>
 
@@ -318,7 +318,7 @@ const DashboardHeader = ({
       {/* ====================================================== */}
       <div
         className="
-          relative p-4 sm:p-6 rounded-2xl
+          relative p-3.5 sm:p-5 rounded-2xl
           bg-white/70 backdrop-blur-sm
           overflow-hidden
         "

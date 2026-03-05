@@ -94,13 +94,15 @@ function getTierPoints(mode, tierId) {
 async function getActiveSessions(req, res) {
   try {
     const result = await query(
-      `SELECT id, title, description, evaluation_mode, academic_year, semester,
-              status, opens_at, closes_at, created_at
-       FROM faculty_evaluation_sessions
-       WHERE status = 'active'
-         AND (opens_at IS NULL OR opens_at <= NOW())
-         AND (closes_at IS NULL OR closes_at > NOW())
-       ORDER BY created_at DESC`,
+      `SELECT fes.id, fes.title, fes.description, fes.evaluation_mode, fes.academic_year, fes.semester,
+              fes.status, fes.opens_at, fes.closes_at, fes.created_at,
+              fes.track, fes.group_id, sg.title as group_title
+       FROM faculty_evaluation_sessions fes
+       LEFT JOIN session_groups sg ON sg.id = fes.group_id
+       WHERE fes.status = 'active'
+         AND (fes.opens_at IS NULL OR fes.opens_at <= NOW())
+         AND (fes.closes_at IS NULL OR fes.closes_at > NOW())
+       ORDER BY fes.created_at DESC`,
     );
 
     // Check submission status for each session

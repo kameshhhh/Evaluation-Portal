@@ -43,9 +43,9 @@ const SetupScopePage = () => {
                 try {
                     setLoading(true);
                     const scopeData = await getMyScope();
-                    if (scopeData.success && scopeData.scope) {
-                        const uniqueTracks = [...new Set(scopeData.scope.map(s => s.track_id))];
-                        const uniqueDepts = scopeData.scope
+                    if (scopeData.success && scopeData.data?.scopes) {
+                        const uniqueTracks = [...new Set(scopeData.data.scopes.map(s => s.track_name.toLowerCase()))];
+                        const uniqueDepts = scopeData.data.scopes
                             .filter(s => s.department_code)
                             .map(s => s.department_code);
 

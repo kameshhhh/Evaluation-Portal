@@ -13,6 +13,7 @@
 import React, { useState, useEffect, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import api from "../../services/api";
+import { getYearLabel } from "../../utils/yearUtils";
 import { listRubrics, attachRubricsToSession } from "../../services/rubricApi";
 import {
   ArrowLeft,
@@ -576,7 +577,7 @@ const CreateSessionForm = () => {
                               student.department_code ||
                               "—"}
                             {student.admissionYear || student.admission_year
-                              ? ` • Batch ${student.admissionYear || student.admission_year}`
+                              ? ` • ${getYearLabel(student.admissionYear || student.admission_year) || `Batch ${student.admissionYear || student.admission_year}`}`
                               : ""}
                           </p>
                         </div>

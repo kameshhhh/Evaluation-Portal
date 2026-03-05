@@ -176,9 +176,25 @@ export const getMySchedules = () => d(api.get(`${BASE}/planner/my-schedules`));
 // SESSION CREATION (uses faculty-evaluation endpoint)
 // ============================================================
 
-/** Create a new evaluation session */
+/** Create a new evaluation session (legacy single session) */
 export const createSession = (data) =>
   d(api.post("/faculty-evaluation/admin/sessions", data));
+
+// ============================================================
+// SESSION GROUPS — Parent-Child Track-Based Sessions
+// ============================================================
+
+/** Create a session group (auto-creates core/it_core/premium child sessions) */
+export const createSessionGroup = (data) =>
+  d(api.post(`${BASE}/session-groups`, data));
+
+/** List all session groups with child sessions */
+export const listSessionGroups = () =>
+  d(api.get(`${BASE}/session-groups`));
+
+/** Get a single session group with full details */
+export const getSessionGroupDetail = (groupId) =>
+  d(api.get(`${BASE}/session-groups/${groupId}`));
 
 // ============================================================
 // AUTO-ASSIGNMENT SUGGESTIONS
@@ -200,9 +216,9 @@ export const suggestEvaluators = (sessionId, studentId) =>
 export const testAutoAssign = (sessionId, rubricIds, minJudges) =>
   d(api.post(`${BASE}/planner/test-auto-assign`, { sessionId, rubricIds, minJudges }));
 
-/** Clear all test assignments */
-export const resetTestAssignments = () =>
-  d(api.delete(`${BASE}/planner/test-auto-assign`));
+/** Clear test assignments for a specific session */
+export const resetTestAssignments = (sessionId) =>
+  d(api.delete(`${BASE}/planner/test-auto-assign`, { data: { sessionId } }));
 
 // ============================================================
 // SESSION FINALIZATION (Admin Only)

@@ -55,7 +55,7 @@ const getCredibilityBands = async (req, res) => {
     logger.error("Failed to get credibility bands", { error: error.message });
     res
       .status(500)
-      .json({ success: false, message: "Failed to load credibility bands" });
+      .json({ success: false, error: "Failed to load credibility bands" });
   }
 };
 
@@ -75,7 +75,7 @@ const recalculateAll = async (req, res) => {
     });
   } catch (error) {
     logger.error("Failed to recalculate credibility", { error: error.message });
-    res.status(500).json({ success: false, message: "Recalculation failed" });
+    res.status(500).json({ success: false, error: "Recalculation failed" });
   }
 };
 

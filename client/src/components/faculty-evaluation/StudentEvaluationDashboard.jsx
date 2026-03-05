@@ -310,8 +310,21 @@ const SessionCard = React.memo(function SessionCard({
             }`}
           />
           <div className="min-w-0">
-            <h3 className="text-base font-semibold text-gray-900 truncate">
+            <h3 className="text-base font-semibold text-gray-900 truncate flex items-center gap-2">
               {session.title}
+              {session.track && (() => {
+                const TB = {
+                  core: "bg-green-100 text-green-700",
+                  it_core: "bg-indigo-100 text-indigo-700",
+                  premium: "bg-amber-100 text-amber-700",
+                };
+                const TL = { core: "Core", it_core: "IT & Core", premium: "Premium" };
+                return (
+                  <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${TB[session.track] || TB.core}`}>
+                    {TL[session.track] || session.track}
+                  </span>
+                );
+              })()}
             </h3>
             <div className="flex items-center gap-3 mt-0.5 text-xs text-gray-500">
               <span>

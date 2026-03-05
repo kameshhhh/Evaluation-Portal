@@ -22,9 +22,9 @@ const api = axios.create({
   // e.g., api.get('/auth/me') → GET http://localhost:5000/api/auth/me
   baseURL: API_BASE_URL,
 
-  // Default timeout — 15 seconds for all requests
-  // Prevents the UI from hanging on unresponsive backends
-  timeout: 15000,
+  // Default timeout — 30 seconds for all requests
+  // Allows enough time for batch operations (auto-assign, recalculate)
+  timeout: 30000,
 
   // Default headers — JSON content type for all requests
   headers: {

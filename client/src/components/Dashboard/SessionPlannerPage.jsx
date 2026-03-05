@@ -37,6 +37,8 @@ import {
   Award,
 } from "lucide-react";
 import useAuth from "../../hooks/useAuth";
+import { getYearLabel, getYearOfStudy, YEAR_CHIPS, YEAR_BADGE_COLORS } from "../../utils/yearUtils";
+import { getBatchYearLabel } from "../../utils/batchHelper";
 import { useSocket } from "../../contexts/SocketContext";
 import {
   useDataChange
@@ -53,6 +55,7 @@ import {
   testAutoAssign,
   resetTestAssignments,
   finalizeSession,
+  getSessionGroupDetail,
 } from "../../services/sessionPlannerApi";
 
 const ASSIGNMENT_STATUS = {
@@ -88,31 +91,7 @@ const ASSIGNMENT_STATUS = {
   },
 };
 
-// Year label from admission_year
-const getYearLabel = (admissionYear) => {
-  if (!admissionYear) return null;
-  const yr = new Date().getFullYear() - admissionYear;
-  if (yr >= 4) return "Final year";
-  if (yr === 3) return "3rd year";
-  if (yr === 2) return "2nd year";
-  if (yr === 1) return "1st year";
-  return null;
-};
-
-const YEAR_CHIPS = [
-  { id: "all", label: "All Years", color: "#6B7280", bg: "rgba(107,114,128,0.08)" },
-  { id: "final", label: "Final year", color: "#DC2626", bg: "rgba(220,38,38,0.08)", match: (y) => y >= 4 },
-  { id: "3rd", label: "3rd year", color: "#7C3AED", bg: "rgba(124,58,237,0.08)", match: (y) => y === 3 },
-  { id: "2nd", label: "2nd year", color: "#2563EB", bg: "rgba(37,99,235,0.08)", match: (y) => y === 2 },
-  { id: "1st", label: "1st year", color: "#059669", bg: "rgba(5,150,105,0.08)", match: (y) => y === 1 },
-];
-
-const YEAR_BADGE_COLORS = {
-  "Final year": { color: "#DC2626", bg: "rgba(220,38,38,0.08)" },
-  "3rd year": { color: "#7C3AED", bg: "rgba(124,58,237,0.08)" },
-  "2nd year": { color: "#2563EB", bg: "rgba(37,99,235,0.08)" },
-  "1st year": { color: "#059669", bg: "rgba(5,150,105,0.08)" },
-};
+// getYearLabel, getYearOfStudy, YEAR_CHIPS, YEAR_BADGE_COLORS imported from yearUtils
 
 
 
@@ -185,6 +164,9 @@ const SessionPlannerPage = () => {
   const [isSuggesting, setIsSuggesting] = useState(false);
   const [suggestionError, setSuggestionError] = useState(null);
 
+  // Sibling sessions (within same group)
+  const [siblingsessions, setSiblingCoreSessions] = useState([]);
+
   // Test Auto-Assignment State
   const [testAssigning, setTestAssigning] = useState(false);
   const [testResetting, setTestResetting] = useState(false);
@@ -192,6 +174,9 @@ const SessionPlannerPage = () => {
 
   // Finalization State
   const [finalizing, setFinalizing] = useState(false);
+
+  // Result notification modal
+  const [resultModal, setResultModal] = useState(null); // { title, message, warnings, type }
 
   const { socket } = useSocket();
 
@@ -206,7 +191,7 @@ const SessionPlannerPage = () => {
       await verifyPlannerPassword(password);
       setAuthenticated(true);
     } catch (err) {
-      setAuthError(err.message || err.response?.data?.error || "Invalid password");
+      setAuthError(err.response?.data?.error || err.message || "Invalid password");
     } finally {
       setAuthLoading(false);
     }
@@ -223,8 +208,20 @@ const SessionPlannerPage = () => {
       ]);
       setOverview(overviewRes.data || null);
       setAllStudents(studentsRes.data || []);
+
+      // Load sibling sessions if this session belongs to a group
+      const sess = overviewRes.data?.session;
+      if (sess?.group_id) {
+        try {
+          const groupRes = await getSessionGroupDetail(sess.group_id);
+          const siblings = (groupRes.data?.sessions || []).filter(s => s.id !== sessionId);
+          setSiblingCoreSessions(siblings);
+        } catch { setSiblingCoreSessions([]); }
+      } else {
+        setSiblingCoreSessions([]);
+      }
     } catch (err) {
-      setError(err.message || err.response?.data?.error || "Failed to load planner data");
+      setError(err.response?.data?.error || err.message || "Failed to load planner data");
     } finally {
       setLoading(false);
     }
@@ -253,10 +250,24 @@ const SessionPlannerPage = () => {
     };
   }, [socket, loadInitialData]);
 
-  // Auto-set year filter from session title (e.g. "Feb S1 - Final Year")
+  // Auto-set year filter from session title (e.g. "Feb S1 - Batch 2027" or legacy "Feb S1 - Final Year")
   useEffect(() => {
     if (!overview?.session?.title) return;
     const title = overview.session.title;
+
+    // New format: "... - Batch 2027 ..."
+    const batchMatch = title.match(/Batch\s+(\d{4})/);
+    if (batchMatch) {
+      const batchYr = Number(batchMatch[1]);
+      const label = getBatchYearLabel(batchYr);
+      const LABEL_TO_CHIP = { "Final Year": "final", "3rd Year": "3rd", "2nd Year": "2nd", "1st Year": "1st" };
+      if (label && LABEL_TO_CHIP[label]) {
+        setYearFilter(LABEL_TO_CHIP[label]);
+        return;
+      }
+    }
+
+    // Legacy format: "... - Final Year ..."
     const YEAR_MAP = {
       "Final Year": "final",
       "3rd Year": "3rd",
@@ -280,7 +291,7 @@ const SessionPlannerPage = () => {
       const res = await suggestEvaluators(sessionId, studentId);
       setSuggestions(res.data || []);
     } catch (err) {
-      setSuggestionError(err.message || err.response?.data?.error || "Failed to fetch suggestions");
+      setSuggestionError(err.response?.data?.error || err.message || "Failed to fetch suggestions");
     } finally {
       setIsSuggesting(false);
       // Note: We keep suggestingFor set to show the modal with results
@@ -299,9 +310,23 @@ const SessionPlannerPage = () => {
       setError(null);
       const res = await testAutoAssign(sessionId, rubricIds, minJudges);
       await loadInitialData();
-      alert(res.message || "Auto-assignment complete!");
+      // Build warnings list
+      const warnings = (res.warnings || []).map(w => {
+        if (typeof w === 'string') return { text: w, students: [] };
+        if (w.type === 'unteamed_core') return {
+          text: `${w.count} Core students have no team and were skipped`,
+          students: (w.students || []).map(s => s.displayName || s.display_name || 'Unknown')
+        };
+        return { text: w.message || JSON.stringify(w), students: [] };
+      });
+      setResultModal({
+        title: 'Auto-Assignment Complete',
+        message: `Created ${res.count || 0} assignments${res.track ? ` for track: ${res.track}` : ''}.`,
+        warnings,
+        type: 'success'
+      });
     } catch (err) {
-      setError(err.message || err.response?.data?.error || "Test auto-assign failed");
+      setError(err.response?.data?.error || err.message || "Test auto-assign failed");
     } finally {
       setTestAssigning(false);
     }
@@ -309,14 +334,19 @@ const SessionPlannerPage = () => {
 
   const handleResetTestAssignments = async () => {
     try {
-      if (!window.confirm("Are you sure you want to remove ALL test assignments?")) return;
+      if (!window.confirm("Remove all test assignments for this session?")) return;
       setTestResetting(true);
       setError(null);
-      const res = await resetTestAssignments();
+      const res = await resetTestAssignments(sessionId);
       await loadInitialData();
-      alert(res.message || "Test assignments removed.");
+      setResultModal({
+        title: 'Assignments Reset',
+        message: res.message || 'Test assignments removed.',
+        warnings: [],
+        type: 'info'
+      });
     } catch (err) {
-      setError(err.message || err.response?.data?.error || "Reset failed");
+      setError(err.response?.data?.error || err.message || "Reset failed");
     } finally {
       setTestResetting(false);
     }
@@ -336,9 +366,18 @@ const SessionPlannerPage = () => {
       setError(null);
       const res = await finalizeSession(sessionId);
       await loadInitialData();
-      alert(res.message || "Session finalized successfully!");
+      const warnings = [];
+      if (res.firstSessionProtection) {
+        warnings.push("First-session two-pass protection was applied — faculty credibility was computed within this session for fairer scoring.");
+      }
+      setResultModal({
+        title: 'Session Finalized',
+        message: res.message || 'Session finalized successfully!',
+        warnings,
+        type: 'success'
+      });
     } catch (err) {
-      setError(err.message || err.response?.data?.error || "Finalization failed");
+      setError(err.response?.data?.error || err.message || "Finalization failed");
     } finally {
       setFinalizing(false);
     }
@@ -360,7 +399,7 @@ const SessionPlannerPage = () => {
       setConflictList([]);
       await loadInitialData();
     } catch (err) {
-      setError(err.message || err.response?.data?.error || "Failed to assign");
+      setError(err.response?.data?.error || err.message || "Failed to assign");
     } finally {
       setAssigning(false);
     }
@@ -369,10 +408,13 @@ const SessionPlannerPage = () => {
   const handleAssign = async () => {
     if (!selectedFaculty || selectedStudents.length === 0 || !sessionId) return;
 
-    // Check mixed years
+    // Check mixed batch years
     const years = new Set(
       selectedStudents
-        .map((id) => allStudents.find((s) => s.person_id === id)?.admission_year)
+        .map((id) => {
+          const s = allStudents.find((st) => st.person_id === id);
+          return s?.batch_year || (s?.admission_year ? s.admission_year + 4 : null);
+        })
         .filter(Boolean)
     );
     if (years.size > 1 && !mixedYearWarn) {
@@ -460,7 +502,7 @@ const SessionPlannerPage = () => {
       await unassignStudent(sessionId, studentId, facultyId);
       await loadInitialData();
     } catch (err) {
-      setError(err.message || err.response?.data?.error || "Failed to unassign");
+      setError(err.response?.data?.error || err.message || "Failed to unassign");
     } finally {
       setRemoving(null);
     }
@@ -520,9 +562,14 @@ const SessionPlannerPage = () => {
     if (trackFilter !== "all" && s.track !== trackFilter) return false;
     if (yearFilter !== "all") {
       const chip = YEAR_CHIPS.find((c) => c.id === yearFilter);
-      if (chip?.match) {
-        const yr = s.admission_year ? new Date().getFullYear() - s.admission_year : 0;
-        if (!chip.match(yr)) return false;
+      if (chip) {
+        const batchYr = s.batch_year || (s.admission_year ? s.admission_year + 4 : null);
+        if (chip.matchBatch && batchYr) {
+          if (!chip.matchBatch(batchYr)) return false;
+        } else if (chip.matchYear) {
+          const yr = getYearOfStudy(s.admission_year) || 0;
+          if (!chip.matchYear(yr)) return false;
+        }
       }
     }
     if (deptFilter !== "all" && (s.department_code || "").toLowerCase() !== deptFilter) return false;
@@ -610,13 +657,13 @@ const SessionPlannerPage = () => {
               }}>
               {s.track === 'core' ? 'CORE' : s.track === 'it_core' ? 'IT-CORE' : s.track === 'premium' ? 'PREMIUM' : 'NO TRACK'}
             </span>
-            {getYearLabel(s.admission_year) && (
+            {(() => { const yLabel = s.batch_year ? getBatchYearLabel(s.batch_year) : getYearLabel(s.admission_year); return yLabel; })() && (
               <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full"
                 style={{
-                  background: YEAR_BADGE_COLORS[getYearLabel(s.admission_year)]?.bg || "rgba(107,114,128,0.08)",
-                  color: YEAR_BADGE_COLORS[getYearLabel(s.admission_year)]?.color || "#6B7280",
+                  background: YEAR_BADGE_COLORS[s.batch_year ? getBatchYearLabel(s.batch_year) : getYearLabel(s.admission_year)]?.bg || "rgba(107,114,128,0.08)",
+                  color: YEAR_BADGE_COLORS[s.batch_year ? getBatchYearLabel(s.batch_year) : getYearLabel(s.admission_year)]?.color || "#6B7280",
                 }}>
-                {getYearLabel(s.admission_year)}
+                {s.batch_year ? getBatchYearLabel(s.batch_year) : getYearLabel(s.admission_year)}
               </span>
             )}
             {s.department_code && (
@@ -798,24 +845,59 @@ const SessionPlannerPage = () => {
           <ArrowLeft size={18} />
         </button>
         <div className="flex-1 min-w-0">
-          <h1 className="text-lg font-bold text-gray-900 truncate">
+          <h1 className="text-lg font-bold text-gray-900 truncate flex items-center gap-2">
             Session Planner
+            {overview?.session?.track && (() => {
+              const TRACK_BADGE = {
+                core: { bg: "bg-green-100", text: "text-green-700", label: "Core" },
+                it_core: { bg: "bg-indigo-100", text: "text-indigo-700", label: "IT & Core" },
+                premium: { bg: "bg-amber-100", text: "text-amber-700", label: "Premium" },
+              };
+              const t = TRACK_BADGE[overview.session.track] || TRACK_BADGE.core;
+              return (
+                <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${t.bg} ${t.text}`}>
+                  {t.label}
+                </span>
+              );
+            })()}
           </h1>
           <p className="text-xs text-gray-400">
             Session: {sessionId?.slice(0, 8)}…
             {overview?.session?.title ? ` • ${overview.session.title}` : ""}
           </p>
-          {overview?.session?.status && (
-            <span
-              className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-semibold mt-1 ${overview.session.status === 'FINALIZED'
-                ? "bg-green-100 text-green-700"
-                : "bg-blue-100 text-blue-700"
-                }`}
-            >
-              {overview.session.status === 'FINALIZED' ? <Lock size={10} /> : <Unlock size={10} />}
-              {overview.session.status}
-            </span>
-          )}
+          <div className="flex items-center gap-2 mt-1">
+            {overview?.session?.status && (
+              <span
+                className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-semibold ${overview.session.status === 'FINALIZED'
+                  ? "bg-green-100 text-green-700"
+                  : "bg-blue-100 text-blue-700"
+                  }`}
+              >
+                {overview.session.status === 'FINALIZED' ? <Lock size={10} /> : <Unlock size={10} />}
+                {overview.session.status}
+              </span>
+            )}
+            {/* Sibling session tabs */}
+            {siblingsessions.length > 0 && siblingsessions.map((sib) => {
+              const STRACK = {
+                core: { bg: "rgba(5,150,105,0.08)", color: "#059669", label: "Core" },
+                it_core: { bg: "rgba(99,102,241,0.08)", color: "#6366F1", label: "IT & Core" },
+                premium: { bg: "rgba(217,119,6,0.08)", color: "#D97706", label: "Premium" },
+              };
+              const st = STRACK[sib.track] || STRACK.core;
+              return (
+                <button
+                  key={sib.id}
+                  onClick={() => navigate(`/session-planner/${sib.id}`)}
+                  className="px-2 py-0.5 rounded-full text-[10px] font-semibold border transition-colors hover:opacity-80"
+                  style={{ background: st.bg, color: st.color, borderColor: st.color }}
+                  title={`Switch to ${st.label} session`}
+                >
+                  → {st.label}
+                </button>
+              );
+            })}
+          </div>
         </div>
         {user?.role === "admin" && (
           <div className="flex items-center gap-2 mr-2">
@@ -1298,8 +1380,15 @@ const SessionPlannerPage = () => {
                     className="px-4 py-2 rounded-lg font-semibold text-white text-sm flex items-center gap-2 disabled:opacity-50"
                     style={{ background: "#7C3AED" }}
                   >
+                    {assigning ? (
+                      <Loader2 size={16} className="animate-spin" />
+                    ) : (
+                      <UserCheck size={16} />
+                    )}
+                    Assign
+                  </button>
 
-                    {/* ── MIXED-YEAR WARNING POPUP ── */}
+                    {/* ── MIXED-YEAR WARNING POPUP (outside button to prevent event bubbling) ── */}
                     {mixedYearWarn && (
                       <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
                         <div
@@ -1324,18 +1413,21 @@ const SessionPlannerPage = () => {
                             <div className="flex flex-wrap gap-1.5 justify-center mt-3">
                               {[...new Set(
                                 selectedStudents
-                                  .map((id) => allStudents.find((s) => s.person_id === id)?.admission_year)
+                                  .map((id) => {
+                                    const s = allStudents.find((st) => st.person_id === id);
+                                    return s?.batch_year || (s?.admission_year ? s.admission_year + 4 : null);
+                                  })
                                   .filter(Boolean)
-                              )].map((ay) => {
-                                const label = getYearLabel(ay);
+                              )].map((by) => {
+                                const label = getBatchYearLabel(by);
                                 const style = YEAR_BADGE_COLORS[label] || {};
                                 return (
                                   <span
-                                    key={ay}
+                                    key={by}
                                     className="text-xs font-semibold px-2 py-0.5 rounded-full"
                                     style={{ background: style.bg || "rgba(107,114,128,0.08)", color: style.color || "#6B7280" }}
                                   >
-                                    {label || `Batch ${ay}`}
+                                    {label ? `${label} (Batch ${by})` : `Batch ${by}`}
                                   </span>
                                 );
                               })}
@@ -1362,13 +1454,6 @@ const SessionPlannerPage = () => {
                         </div>
                       </div>
                     )}
-                    {assigning ? (
-                      <Loader2 size={16} className="animate-spin" />
-                    ) : (
-                      <UserCheck size={16} />
-                    )}
-                    Assign
-                  </button>
                 </div>
               )
             }
@@ -1579,6 +1664,72 @@ const SessionPlannerPage = () => {
         onConfirm={handleAutoAssignConfirm}
         onClose={() => setShowAutoAssignModal(false)}
       />
+
+      {/* ====================================================== */}
+      {/* RESULT NOTIFICATION MODAL                               */}
+      {/* ====================================================== */}
+      {resultModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md mx-4 overflow-hidden animate-in fade-in zoom-in">
+            {/* Header bar */}
+            <div className={`px-6 py-4 flex items-center gap-3 ${
+              resultModal.type === 'success' ? 'bg-emerald-50 border-b border-emerald-100' : 'bg-blue-50 border-b border-blue-100'
+            }`}>
+              <div className={`p-2 rounded-full ${
+                resultModal.type === 'success' ? 'bg-emerald-100 text-emerald-600' : 'bg-blue-100 text-blue-600'
+              }`}>
+                {resultModal.type === 'success' ? <CheckCircle2 size={22} /> : <AlertCircle size={22} />}
+              </div>
+              <h3 className="text-lg font-semibold text-gray-900">{resultModal.title}</h3>
+              <button onClick={() => setResultModal(null)} className="ml-auto p-1 rounded-lg hover:bg-black/5 transition">
+                <X size={18} className="text-gray-400" />
+              </button>
+            </div>
+
+            {/* Body */}
+            <div className="px-6 py-5 space-y-4">
+              <p className="text-gray-700 text-[15px] leading-relaxed">{resultModal.message}</p>
+
+              {resultModal.warnings?.length > 0 && (
+                <div className="space-y-3">
+                  {resultModal.warnings.map((w, i) => (
+                    <div key={i} className="bg-amber-50 border border-amber-200 rounded-xl p-4">
+                      <div className="flex items-center gap-2 mb-1">
+                        <AlertCircle size={15} className="text-amber-500 shrink-0" />
+                        <span className="text-sm font-medium text-amber-800">{w.text}</span>
+                      </div>
+                      {w.students?.length > 0 && (
+                        <div className="mt-2 ml-6 flex flex-wrap gap-1.5">
+                          {w.students.map((name, j) => (
+                            <span key={j} className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-amber-100 text-amber-700 border border-amber-200">
+                              <GraduationCap size={11} className="mr-1" />
+                              {name}
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Footer */}
+            <div className="px-6 py-4 bg-gray-50 border-t border-gray-100 flex justify-end">
+              <button
+                onClick={() => setResultModal(null)}
+                className={`px-5 py-2.5 rounded-xl text-sm font-semibold text-white transition shadow-sm ${
+                  resultModal.type === 'success'
+                    ? 'bg-emerald-500 hover:bg-emerald-600'
+                    : 'bg-blue-500 hover:bg-blue-600'
+                }`}
+              >
+                OK
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div >
   );
 };

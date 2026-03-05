@@ -39,6 +39,9 @@ import {
   GraduationCap, // Faculty evaluation tab icon
   ClipboardList, // Team management tab icon
   BookOpen, // Rubrics tab icon
+  FileText, // Session report tab icon
+  Bell, // Alerts tab icon
+  Settings, // Admin management tab icon
 } from "lucide-react";
 
 // Import admin sub-components
@@ -51,6 +54,9 @@ import CohortManagementTab from "./admin/CohortManagementTab";
 import FacultyEvalTab from "./admin/FacultyEvalTab";
 import TeamManagementTab from "./admin/TeamManagementTab";
 import RubricManagementTab from "./admin/RubricManagementTab";
+import SessionReportTab from "./admin/SessionReportTab";
+import AlertsAppealsTab from "./admin/AlertsAppealsTab";
+import AdminManagementTab from "./admin/AdminManagementTab";
 
 // ============================================================
 // TAB CONFIGURATION — Defines the admin navigation tabs
@@ -111,6 +117,24 @@ const ADMIN_TABS = [
     icon: BookOpen,
     description: "Evaluation rubric management",
   },
+  {
+    id: "session-report",
+    label: "Session Report",
+    icon: FileText,
+    description: "Session evaluation insights & reporting",
+  },
+  {
+    id: "alerts",
+    label: "Alerts & Appeals",
+    icon: Bell,
+    description: "Anomaly alerts & student score appeals",
+  },
+  {
+    id: "management",
+    label: "Management",
+    icon: Settings,
+    description: "Delete sessions & reset credibility",
+  },
 ];
 
 // ============================================================
@@ -139,11 +163,11 @@ const AdminDashboard = ({ data, onRefresh }) => {
     // Main container with gradient background (matches existing pages)
     <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100">
       {/* Content wrapper — wider max-width for table layouts */}
-      <main className="max-w-7xl mx-auto px-4 py-8">
+      <main className="w-full mx-auto px-4 sm:px-6 py-5">
         {/* ====================================================== */}
         {/* WELCOME HEADER — Admin greeting + refresh */}
         {/* ====================================================== */}
-        <div className="flex items-center justify-between mb-6">
+        <div className="flex items-center justify-between mb-4">
           <div>
             {/* Admin name greeting */}
             <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
@@ -184,7 +208,7 @@ const AdminDashboard = ({ data, onRefresh }) => {
         {/* ====================================================== */}
         {/* TAB NAVIGATION — Switch between admin views */}
         {/* ====================================================== */}
-        <div className="flex gap-1 bg-white rounded-2xl shadow-sm border border-gray-200/50 p-1.5 mb-6">
+        <div className="flex gap-1 bg-white rounded-2xl shadow-sm border border-gray-200/50 p-1.5 mb-4 overflow-x-auto scrollbar-hide">
           {ADMIN_TABS.map((tab) => {
             const TabIcon = tab.icon;
             const isActive = activeTab === tab.id;
@@ -193,7 +217,7 @@ const AdminDashboard = ({ data, onRefresh }) => {
               <button
                 key={tab.id}
                 onClick={() => setActiveTab(tab.id)}
-                className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-medium 
+                className={`flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-medium whitespace-nowrap flex-shrink-0
                            transition-all duration-200 ${
                              isActive
                                ? "bg-red-50 text-red-700 shadow-sm border border-red-200/50"
@@ -202,7 +226,7 @@ const AdminDashboard = ({ data, onRefresh }) => {
                 title={tab.description}
               >
                 <TabIcon
-                  className={`h-4 w-4 ${isActive ? "text-red-600" : ""}`}
+                  className={`h-3.5 w-3.5 ${isActive ? "text-red-600" : ""}`}
                 />
                 {tab.label}
               </button>
@@ -246,6 +270,15 @@ const AdminDashboard = ({ data, onRefresh }) => {
 
           {/* Rubrics tab — SRS §4.1.4 rubric-based distribution */}
           {activeTab === "rubrics" && <RubricManagementTab />}
+
+          {/* Session Report tab — evaluation insights per session */}
+          {activeTab === "session-report" && <SessionReportTab />}
+
+          {/* Alerts & Appeals tab — anomaly alerts + student appeals */}
+          {activeTab === "alerts" && <AlertsAppealsTab />}
+
+          {/* Admin Management tab — delete sessions + reset credibility */}
+          {activeTab === "management" && <AdminManagementTab />}
         </div>
       </main>
     </div>

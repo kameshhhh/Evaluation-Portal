@@ -48,6 +48,12 @@ class AutoAssignmentService {
             if (studentRes.rows.length === 0) throw new Error("Student not found");
             const student = studentRes.rows[0];
 
+            // Guard: if student has no track selection, no candidates can match
+            if (!student.track) {
+                logger.warn("AutoAssignment: Student has no track selection — skipping", { studentId });
+                return [];
+            }
+
             // 2. Fetch Current Assignments (for Balance Calculation)
             const currentTeamRes = await query(
                 `SELECT spa.faculty_id, COALESCE(jcm.credibility_score, 1.0) as score
@@ -164,11 +170,20 @@ class AutoAssignmentService {
         try {
             await client.query("BEGIN");
 
-            // 1. Check if session already has evaluated marks
+            // Concurrency guard: row-level lock on session
             const sessionCheck = await client.query(
-                `SELECT auto_suggested FROM faculty_evaluation_sessions WHERE id = $1`,
+                `SELECT auto_suggested, status, track FROM faculty_evaluation_sessions WHERE id = $1 FOR UPDATE`,
                 [sessionId]
             );
+            if (!sessionCheck.rows[0]) throw new Error("Session not found");
+            if (sessionCheck.rows[0].status === 'FINALIZED') {
+                throw new Error("Cannot assign in a finalized session.");
+            }
+
+            // Track filter: when session has a track, only assign students of that track
+            const sessionTrack = sessionCheck.rows[0].track || null;
+
+            // 1. Guard: reject if assignments already exist and evaluation started
             if (sessionCheck.rows[0]?.auto_suggested) {
                 const marksCheck = await client.query(
                     `SELECT 1 FROM session_planner_assignments 
@@ -178,39 +193,52 @@ class AutoAssignmentService {
                 if (marksCheck.rows.length > 0) {
                     throw new Error("Cannot re-run auto-assignment after evaluation has started.");
                 }
+                // No marks submitted yet — allow re-run (idempotent via ON CONFLICT DO NOTHING)
             }
 
-            // 2. Load Students with team_formation_id
+            // 2. Load Students with team_formation_id (filtered by session track + batch_year if set)
             const studentRes = await client.query(
                 `SELECT p.person_id, p.display_name, sts.track, p.department_code,
+                        p.graduation_year AS batch_year,
                         tfr.id AS team_formation_id
                  FROM persons p
                  JOIN student_track_selections sts ON sts.person_id = p.person_id
                  JOIN users u ON u.internal_user_id = p.identity_id
                  JOIN faculty_evaluation_sessions fes ON fes.id = $1
                  LEFT JOIN team_formation_requests tfr
-                      ON tfr.leader_id = p.person_id AND tfr.status = 'approved'
+                      ON tfr.leader_id = p.person_id AND tfr.status = 'admin_approved'
                  WHERE u.user_role = 'student'
                    AND p.status = 'active' AND p.is_deleted = false
-                   AND sts.academic_year = fes.academic_year`,
-                [sessionId]
+                   AND (
+                     (fes.batch_year IS NOT NULL AND p.graduation_year = fes.batch_year)
+                     OR
+                     (fes.batch_year IS NULL AND sts.academic_year = fes.academic_year)
+                   )
+                   AND ($2::varchar IS NULL OR sts.track = $2)`,
+                [sessionId, sessionTrack]
             );
 
             // Also get students who are team members (not leaders)
             const memberRes = await client.query(
                 `SELECT ti.invitee_id AS person_id, p.display_name, sts.track, p.department_code,
+                        p.graduation_year AS batch_year,
                         ti.formation_id AS team_formation_id
                  FROM team_invitations ti
                  JOIN persons p ON p.person_id = ti.invitee_id
                  JOIN student_track_selections sts ON sts.person_id = ti.invitee_id
                  JOIN users u ON u.internal_user_id = p.identity_id
                  JOIN faculty_evaluation_sessions fes ON fes.id = $1
-                 JOIN team_formation_requests tfr ON tfr.id = ti.formation_id AND tfr.status = 'approved'
+                 JOIN team_formation_requests tfr ON tfr.id = ti.formation_id AND tfr.status = 'admin_approved'
                  WHERE ti.status = 'accepted'
                    AND u.user_role = 'student'
                    AND p.status = 'active' AND p.is_deleted = false
-                   AND sts.academic_year = fes.academic_year`,
-                [sessionId]
+                   AND (
+                     (fes.batch_year IS NOT NULL AND p.graduation_year = fes.batch_year)
+                     OR
+                     (fes.batch_year IS NULL AND sts.academic_year = fes.academic_year)
+                   )
+                   AND ($2::varchar IS NULL OR sts.track = $2)`,
+                [sessionId, sessionTrack]
             );
 
             // Merge and deduplicate
@@ -223,7 +251,7 @@ class AutoAssignmentService {
                 }
             }
 
-            if (allStudents.length === 0) return { success: true, count: 0, teams: 0 };
+            if (allStudents.length === 0) return { success: true, count: 0, teams: 0, track: sessionTrack };
 
             // 3. Group by team_formation_id (teams as units)
             const teamMap = new Map(); // team_formation_id → [student]
@@ -237,6 +265,11 @@ class AutoAssignmentService {
                     soloStudents.push(s);
                 }
             }
+
+            // ── Warning: unteamed Core students (core track requires team of 3-4) ──
+            const unteamedCoreStudents = soloStudents
+                .filter(s => s.track === 'core')
+                .map(s => ({ personId: s.person_id, displayName: s.display_name }));
 
             // Shuffle teams and solos for fairness
             const teamGroups = Array.from(teamMap.values()).sort(() => Math.random() - 0.5);
@@ -329,6 +362,10 @@ class AutoAssignmentService {
                 count: assignments.length,
                 teams: teamGroups.length,
                 solos: shuffledSolos.length,
+                track: sessionTrack,
+                warnings: unteamedCoreStudents.length > 0
+                    ? [{ type: 'unteamed_core', count: unteamedCoreStudents.length, students: unteamedCoreStudents }]
+                    : [],
             };
 
         } catch (error) {

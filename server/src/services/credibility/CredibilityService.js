@@ -32,6 +32,16 @@ const TemporalSmoother = require("./compositors/TemporalSmoother");
 
 class CredibilityService {
 
+    // ─── SAFE JSON PARSE HELPER ───────────────────────────────
+    _safeParseRubricMarks(data) {
+        try {
+            return typeof data === 'string' ? JSON.parse(data) : (data || {});
+        } catch {
+            logger.warn("CredibilityService: Malformed rubric_marks JSON, skipping", { data: String(data).slice(0, 100) });
+            return {};
+        }
+    }
+
     // ─── SNAPSHOT BUILDER ────────────────────────────────────
     async _buildAndStoreSnapshot(client, sessionId) {
         const judgesRes = await client.query(
@@ -93,11 +103,13 @@ class CredibilityService {
             let submissions;
             if (snapshot) {
                 const res = await q(
-                    `SELECT spa.faculty_id, spa.marks, spa.rubric_marks, spa.team_formation_id
+                    `SELECT DISTINCT ON (spa.faculty_id)
+                            spa.faculty_id, spa.marks, spa.rubric_marks, spa.team_formation_id
                      FROM session_planner_assignments spa
                      WHERE spa.session_id = $1
                        AND spa.student_id = $2
-                       AND spa.status = 'evaluation_done'`,
+                       AND spa.status = 'evaluation_done'
+                     ORDER BY spa.faculty_id, spa.marks_submitted_at DESC NULLS LAST`,
                     [sessionId, studentId]
                 );
                 submissions = res.rows.map(row => ({
@@ -106,14 +118,16 @@ class CredibilityService {
                 }));
             } else {
                 const res = await q(
-                    `SELECT spa.faculty_id, spa.marks, spa.rubric_marks, spa.team_formation_id,
+                    `SELECT DISTINCT ON (spa.faculty_id)
+                            spa.faculty_id, spa.marks, spa.rubric_marks, spa.team_formation_id,
                             COALESCE(jcm.credibility_score, 1.0) AS credibility_score
                      FROM session_planner_assignments spa
                      LEFT JOIN judge_credibility_metrics jcm
                             ON jcm.evaluator_id = spa.faculty_id
                      WHERE spa.session_id = $1
                        AND spa.student_id = $2
-                       AND spa.status = 'evaluation_done'`,
+                       AND spa.status = 'evaluation_done'
+                     ORDER BY spa.faculty_id, spa.marks_submitted_at DESC NULLS LAST`,
                     [sessionId, studentId]
                 );
                 submissions = res.rows;
@@ -126,9 +140,7 @@ class CredibilityService {
             // Collect all rubric IDs from submissions
             const allRubricIds = new Set();
             submissions.forEach(sub => {
-                const rm = typeof sub.rubric_marks === 'string'
-                    ? JSON.parse(sub.rubric_marks)
-                    : (sub.rubric_marks || {});
+                const rm = this._safeParseRubricMarks(sub.rubric_marks);
                 Object.keys(rm).forEach(id => allRubricIds.add(id));
             });
 
@@ -145,45 +157,17 @@ class CredibilityService {
                 nameRes.rows.forEach(r => { rubricNameMap[r.head_id] = r.head_name; });
             }
 
-            // Determine team size for pool normalization
-            // Solo student: teamSize = 1, pool = 5
-            // Team: count distinct students sharing the team_formation_id
-            const teamFormationId = submissions[0]?.team_formation_id;
-            let teamSize = 1;
-            if (teamFormationId) {
-                const teamRes = await q(
-                    `SELECT COUNT(DISTINCT student_id) AS cnt
-                     FROM session_planner_assignments
-                     WHERE session_id = $1 AND team_formation_id = $2 AND status != 'removed'`,
-                    [sessionId, teamFormationId]
-                );
-                teamSize = parseInt(teamRes.rows[0]?.cnt) || 1;
-            }
-            const teamPool = teamSize * 5;
-
-            // Compute per-rubric pools (floor + alphabetical remainder)
-            const sortedRubricIds = Object.entries(rubricNameMap)
-                .sort((a, b) => a[1].localeCompare(b[1]))
-                .map(e => e[0]);
-            const orderedIds = sortedRubricIds.length > 0 ? sortedRubricIds : [...rubricIds].sort();
-            const basePool = Math.floor(teamPool / rubricCount);
-            const poolRemainder = teamPool % rubricCount;
-            const perRubricPool = {};
-            orderedIds.forEach((rid, idx) => {
-                perRubricPool[rid] = basePool + (idx < poolRemainder ? 1 : 0);
-            });
-
             // Compute per-rubric weighted averages
+            // Each rubric mark is already 0-5 scale; no pool normalization needed.
+            // Pool constraints apply at SUBMISSION time only (scarcity), not at aggregation.
             const rubricBreakdown = {};
-            let totalNormalizedSum = 0;
+            let totalWeightedSum = 0;
 
             for (const rubricId of rubricIds) {
                 let weightedSum = 0, totalWeight = 0, rawSum = 0, count = 0;
 
                 for (const sub of submissions) {
-                    const rm = typeof sub.rubric_marks === 'string'
-                        ? JSON.parse(sub.rubric_marks)
-                        : (sub.rubric_marks || {});
+                    const rm = this._safeParseRubricMarks(sub.rubric_marks);
                     const mark = Number(rm[rubricId] ?? 0);
                     const weight = parseFloat(sub.credibility_score);
 
@@ -196,23 +180,20 @@ class CredibilityService {
                 const weightedAvg = totalWeight > 0 ? (weightedSum / totalWeight) : 0;
                 const rawAvg = count > 0 ? (rawSum / count) : 0;
 
-                // Normalize per-rubric: (weightedAvg / rubricPool) × 5 → always 0-5 scale
-                const rubricPool = perRubricPool[rubricId] || basePool || 1;
-                const normalizedScore = Math.min(5, (weightedAvg / rubricPool) * 5);
-                const normalizedRaw = Math.min(5, (rawAvg / rubricPool) * 5);
-
                 const rubricName = rubricNameMap[rubricId] || rubricId;
-                rubricBreakdown[rubricName] = {
-                    weighted_avg: +normalizedScore.toFixed(4),
-                    raw_avg: +normalizedRaw.toFixed(4),
+                // Key by UUID so downstream (session report, dashboard) can look up directly
+                rubricBreakdown[rubricId] = {
+                    name: rubricName,
+                    weighted_avg: +weightedAvg.toFixed(4),
+                    raw_avg: +rawAvg.toFixed(4),
                     judge_count: count,
                 };
 
-                totalNormalizedSum += normalizedScore;
+                totalWeightedSum += weightedAvg;
             }
 
-            // display_score = avg of normalized per-rubric scores → always 0-5
-            const displayScore = rubricCount > 0 ? (totalNormalizedSum / rubricCount) : 0;
+            // display_score = avg of weighted per-rubric scores → already 0-5
+            const displayScore = rubricCount > 0 ? (totalWeightedSum / rubricCount) : 0;
 
             // Legacy: compute total-based scores for backward compat
             let legacyWeightedSum = 0, legacyTotalWeight = 0, rawTotal = 0;
@@ -281,11 +262,217 @@ class CredibilityService {
         }
     }
 
+    // ─── BATCH STUDENT SCORING (Performance Fix #1) ─────────
+    /**
+     * Computes credibility-weighted scores for ALL students in one pass.
+     * Replaces the per-student loop (3 queries × N) with:
+     *   1 query  → fetch ALL assignments
+     *   1 query  → fetch ALL rubric names
+     *   ceil(N/500) → batch UPSERT chunks
+     * Total: ~4 queries for 4000 students instead of 12,000.
+     *
+     * Math is IDENTICAL to calculateStudentScore — same weighted avg formula.
+     */
+    async _batchCalculateStudentScores(sessionId, snapshot, client) {
+        // 1. Fetch ALL evaluated assignments in one query (DISTINCT per faculty+student)
+        const allAssignRes = await client.query(
+            `SELECT DISTINCT ON (spa.faculty_id, spa.student_id)
+                    spa.faculty_id, spa.student_id, spa.marks,
+                    spa.rubric_marks, spa.team_formation_id
+             FROM session_planner_assignments spa
+             WHERE spa.session_id = $1
+               AND spa.status = 'evaluation_done'
+             ORDER BY spa.faculty_id, spa.student_id, spa.marks_submitted_at DESC NULLS LAST`,
+            [sessionId]
+        );
+
+        if (allAssignRes.rows.length === 0) return [];
+
+        // 2. Collect ALL rubric IDs and fetch names in one query
+        const allRubricIdSet = new Set();
+        for (const row of allAssignRes.rows) {
+            const rm = this._safeParseRubricMarks(row.rubric_marks);
+            for (const id of Object.keys(rm)) allRubricIdSet.add(id);
+        }
+        const allRubricIds = Array.from(allRubricIdSet);
+
+        let rubricNameMap = {};
+        if (allRubricIds.length > 0) {
+            const nameRes = await client.query(
+                `SELECT head_id, head_name FROM evaluation_heads
+                 WHERE head_id = ANY($1::uuid[]) ORDER BY head_name ASC`,
+                [allRubricIds]
+            );
+            nameRes.rows.forEach(r => { rubricNameMap[r.head_id] = r.head_name; });
+        }
+
+        // 3. Group by student_id in memory
+        const studentMap = {};
+        for (const row of allAssignRes.rows) {
+            if (!studentMap[row.student_id]) studentMap[row.student_id] = [];
+            studentMap[row.student_id].push({
+                ...row,
+                credibility_score: snapshot[row.faculty_id] ?? 1.0,
+            });
+        }
+
+        // 4. Compute scores per student in memory (SAME MATH as calculateStudentScore)
+        const studentResults = [];
+        const upsertRows = [];
+
+        for (const [studentId, submissions] of Object.entries(studentMap)) {
+            // Collect rubric IDs for this student
+            const studentRubricIds = new Set();
+            for (const sub of submissions) {
+                const rm = this._safeParseRubricMarks(sub.rubric_marks);
+                for (const id of Object.keys(rm)) studentRubricIds.add(id);
+            }
+            const rubricIdsArr = Array.from(studentRubricIds);
+            const rubricCount = rubricIdsArr.length || 1;
+
+            // Per-rubric weighted averages
+            const rubricBreakdown = {};
+            let totalWeightedSum = 0;
+
+            for (const rubricId of rubricIdsArr) {
+                let weightedSum = 0, totalWeight = 0, rawSum = 0, count = 0;
+
+                for (const sub of submissions) {
+                    const rm = this._safeParseRubricMarks(sub.rubric_marks);
+                    const mark = Number(rm[rubricId] ?? 0);
+                    const weight = parseFloat(sub.credibility_score);
+
+                    weightedSum += mark * weight;
+                    totalWeight += weight;
+                    rawSum += mark;
+                    count++;
+                }
+
+                const weightedAvg = totalWeight > 0 ? (weightedSum / totalWeight) : 0;
+                const rawAvg = count > 0 ? (rawSum / count) : 0;
+                const rubricName = rubricNameMap[rubricId] || rubricId;
+
+                rubricBreakdown[rubricId] = {
+                    name: rubricName,
+                    weighted_avg: +weightedAvg.toFixed(4),
+                    raw_avg: +rawAvg.toFixed(4),
+                    judge_count: count,
+                };
+                totalWeightedSum += weightedAvg;
+            }
+
+            const displayScore = rubricCount > 0 ? (totalWeightedSum / rubricCount) : 0;
+
+            // Legacy total-based scores (backward compat)
+            let legacyWeightedSum = 0, legacyTotalWeight = 0, rawTotal = 0;
+            const rawTotalMarks = [];
+            const breakdown = {};
+
+            for (const sub of submissions) {
+                const weight = parseFloat(sub.credibility_score);
+                const marks = parseFloat(sub.marks || 0);
+                legacyWeightedSum += marks * weight;
+                legacyTotalWeight += weight;
+                rawTotal += marks;
+                rawTotalMarks.push(marks);
+                breakdown[sub.faculty_id] = {
+                    marks,
+                    credibility_weight: +weight.toFixed(4),
+                    weighted_contribution: +(marks * weight).toFixed(4),
+                    weight_share: 0,
+                };
+            }
+
+            Object.values(breakdown).forEach(b => {
+                b.weight_share = legacyTotalWeight > 0
+                    ? +((b.credibility_weight / legacyTotalWeight) * 100).toFixed(1) : 0;
+            });
+
+            const normalizedScore = legacyTotalWeight > 0 ? (legacyWeightedSum / legacyTotalWeight) : 0;
+            const aggregatedScore = rawTotal / submissions.length;
+            const confidenceScore = this._calculateConfidence(rawTotalMarks);
+
+            upsertRows.push({
+                studentId, aggregatedScore, normalizedScore, confidenceScore,
+                judgeCount: submissions.length,
+                breakdown: JSON.stringify(breakdown),
+                displayScore: +displayScore.toFixed(2),
+                rubricBreakdown: JSON.stringify(rubricBreakdown),
+            });
+
+            studentResults.push({
+                studentId,
+                status: "SUCCESS",
+                displayScore: +displayScore.toFixed(2),
+                normalizedScore,
+                aggregatedScore,
+                confidenceScore,
+            });
+        }
+
+        // 5. Batch UPSERT: chunks of 500 rows
+        const CHUNK_SIZE = 500;
+        for (let i = 0; i < upsertRows.length; i += CHUNK_SIZE) {
+            const chunk = upsertRows.slice(i, i + CHUNK_SIZE);
+            const values = [];
+            const params = [];
+            let idx = 1;
+
+            for (const row of chunk) {
+                values.push(
+                    `($${idx++}, $${idx++}, $${idx++}, $${idx++}, $${idx++}, $${idx++}, $${idx++}, $${idx++}, $${idx++}, NOW())`
+                );
+                params.push(
+                    sessionId, row.studentId, row.aggregatedScore, row.normalizedScore,
+                    row.confidenceScore, row.judgeCount, row.breakdown,
+                    row.displayScore, row.rubricBreakdown
+                );
+            }
+
+            await client.query(
+                `INSERT INTO final_student_results (
+                    session_id, student_id, aggregated_score, normalized_score,
+                    confidence_score, judge_count, credibility_breakdown,
+                    display_score, rubric_breakdown, finalized_at
+                 ) VALUES ${values.join(', ')}
+                 ON CONFLICT (session_id, student_id) DO UPDATE SET
+                    aggregated_score = EXCLUDED.aggregated_score,
+                    normalized_score = EXCLUDED.normalized_score,
+                    confidence_score = EXCLUDED.confidence_score,
+                    judge_count = EXCLUDED.judge_count,
+                    credibility_breakdown = EXCLUDED.credibility_breakdown,
+                    display_score = EXCLUDED.display_score,
+                    rubric_breakdown = EXCLUDED.rubric_breakdown,
+                    finalized_at = NOW()`,
+                params
+            );
+        }
+
+        logger.info("CredibilityService: Batch scored students", {
+            sessionId,
+            studentsScored: studentResults.length,
+            totalAssignments: allAssignRes.rows.length,
+            upsertChunks: Math.ceil(upsertRows.length / CHUNK_SIZE),
+        });
+
+        return studentResults;
+    }
+
     // ─── FINALIZE SESSION ────────────────────────────────────
     async finalizeSession(sessionId) {
         const client = await require("../../config/database").pool.connect();
         try {
             await client.query("BEGIN");
+
+            // Concurrency guard: row-level lock prevents parallel finalization
+            const lockRes = await client.query(
+                `SELECT status FROM faculty_evaluation_sessions WHERE id = $1 FOR UPDATE`,
+                [sessionId]
+            );
+            if (!lockRes.rows[0]) throw new Error("Session not found");
+            if (lockRes.rows[0].status === 'FINALIZED') {
+                throw new Error("Session is already finalized");
+            }
 
             // Step 1: Freeze Credibility Snapshot
             const snapshot = await this._buildAndStoreSnapshot(client, sessionId);
@@ -295,24 +482,47 @@ class CredibilityService {
                 `SELECT preferred_rubric_ids FROM faculty_evaluation_sessions WHERE id = $1`,
                 [sessionId]
             );
-            const rubricIds = sessionRes.rows[0]?.preferred_rubric_ids || [];
+            let rubricIds = sessionRes.rows[0]?.preferred_rubric_ids || [];
+
+            // Backfill: if preferred_rubric_ids is NULL, extract from first evaluated assignment
+            if (rubricIds.length === 0) {
+                const firstAssign = await client.query(
+                    `SELECT rubric_marks FROM session_planner_assignments
+                     WHERE session_id = $1 AND status = 'evaluation_done' AND rubric_marks IS NOT NULL
+                     LIMIT 1`,
+                    [sessionId]
+                );
+                if (firstAssign.rows.length > 0) {
+                    const rm = this._safeParseRubricMarks(firstAssign.rows[0].rubric_marks);
+                    rubricIds = Object.keys(rm || {});
+                    // Validate UUIDs before casting to uuid[]
+                    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+                    rubricIds = rubricIds.filter(id => uuidRegex.test(id));
+                    if (rubricIds.length > 0) {
+                        await client.query(
+                            `UPDATE faculty_evaluation_sessions SET preferred_rubric_ids = $1::uuid[] WHERE id = $2`,
+                            [rubricIds, sessionId]
+                        );
+                        logger.info("CredibilityService: Backfilled preferred_rubric_ids", {
+                            sessionId, rubricIds
+                        });
+                    }
+                }
+            }
+
             const rubricCount = rubricIds.length || 1;
             const scaleMax = rubricCount * 5;
 
-            // Step 2: Calculate All Student Scores (using snapshot)
-            const studentsRes = await client.query(
-                `SELECT DISTINCT student_id FROM session_planner_assignments
-                 WHERE session_id = $1 AND status = 'evaluation_done'`,
-                [sessionId]
-            );
-
-            const studentResults = [];
-            for (const row of studentsRes.rows) {
-                const result = await this.calculateStudentScore(
-                    sessionId, row.student_id, snapshot, client
-                );
-                studentResults.push({ studentId: row.student_id, ...result });
+            // ── First-session detection (Fix #2: Fairness Protection) ──
+            const isFirstSession = Object.values(snapshot).every(c => c === 1.0);
+            if (isFirstSession) {
+                logger.info("CredibilityService: First session detected — two-pass protection enabled", { sessionId });
             }
+
+            // Step 2: Batch Calculate All Student Scores (Fix #1: Performance)
+            // OLD: 3 queries × N students → 12,000 queries for 4000 students → 120s timeout
+            // NEW: 2 queries + ceil(N/500) UPSERTs → ~10 queries for 4000 students → 2-5s
+            let studentResults = await this._batchCalculateStudentScores(sessionId, snapshot, client);
 
             if (studentResults.length > 0) {
                 await client.query(
@@ -346,7 +556,7 @@ class CredibilityService {
                 fd.marks.push(parseFloat(row.marks || 0));
                 fd.consensusMeans[row.student_id] = { mean: parseFloat(row.consensus || 0) };
 
-                const rm = typeof row.rubric_marks === 'string' ? JSON.parse(row.rubric_marks) : (row.rubric_marks || {});
+                const rm = this._safeParseRubricMarks(row.rubric_marks);
                 const cb = typeof row.consensus_breakdown === 'string' ? JSON.parse(row.consensus_breakdown) : (row.consensus_breakdown || {});
 
                 for (const [rid, mark] of Object.entries(rm)) {
@@ -354,11 +564,27 @@ class CredibilityService {
                     fd.rubricAllocations[rid].push({ target_id: row.student_id, points: Number(mark) });
 
                     if (!fd.rubricConsensusMeans[rid]) fd.rubricConsensusMeans[rid] = {};
+                    // cb is now UUID-keyed (from Fix 1). Fallback: try name key for old data.
+                    const cbEntry = cb[rid] || Object.values(cb).find(v => v && v.name && v.name === rid);
                     fd.rubricConsensusMeans[rid][row.student_id] = {
-                        mean: cb[rid]?.weighted_avg ?? Number(mark)
+                        mean: cbEntry?.weighted_avg ?? Number(mark)
                     };
                 }
             });
+
+            // Pre-fetch ALL judge metrics in ONE query (batch optimization)
+            const allFacultyIds = Object.keys(facultyData);
+            let metricsMap = {};
+            if (allFacultyIds.length > 0) {
+                const metricsRes = await client.query(
+                    `SELECT evaluator_id, credibility_score, deviation_index,
+                            participation_count, history
+                     FROM judge_credibility_metrics
+                     WHERE evaluator_id = ANY($1::uuid[])`,
+                    [allFacultyIds]
+                );
+                metricsRes.rows.forEach(r => { metricsMap[r.evaluator_id] = r; });
+            }
 
             const judgesUpdated = {};
 
@@ -405,16 +631,12 @@ class CredibilityService {
                 const alignmentScore = alignmentCount > 0 ? alignmentScoreSum / alignmentCount : 0.5;
                 const finalDeviation = alignmentCount > 0 ? avgDeviation / alignmentCount : 0;
 
-                // ② STABILITY
-                const existingRes = await client.query(
-                    `SELECT credibility_score, deviation_index, participation_count, history
-                     FROM judge_credibility_metrics WHERE evaluator_id = $1`,
-                    [facultyId]
-                );
+                // ② STABILITY (uses pre-fetched metrics — batch optimization)
+                const existingMetric = metricsMap[facultyId];
 
                 let stabilityScore = 0.5, participationCount = 0, oldProfileScore = null;
-                if (existingRes.rows.length > 0) {
-                    const existing = existingRes.rows[0];
+                if (existingMetric) {
+                    const existing = existingMetric;
                     participationCount = existing.participation_count || 0;
                     oldProfileScore = parseFloat(existing.credibility_score);
                     const history = existing.history || [];
@@ -533,6 +755,34 @@ class CredibilityService {
                 };
             }
 
+            // ── First-Session Two-Pass Protection (Fix #2) ──────────────
+            // After computing faculty credibility in Step 3, re-score students
+            // using the freshly computed weights so even Session 1 is fair.
+            // Pass 1 used raw averages (all cred=1.0). Pass 2 uses real alignment.
+            if (isFirstSession && Object.keys(judgesUpdated).length > 0) {
+                const freshSnapshot = { ...snapshot }; // Start with original
+                for (const [fid, data] of Object.entries(judgesUpdated)) {
+                    freshSnapshot[fid] = data.mapped;
+                }
+                logger.info("CredibilityService: Two-pass rescoring with fresh credibility", {
+                    sessionId,
+                    facultyCount: Object.keys(freshSnapshot).length,
+                    sample: Object.fromEntries(
+                        Object.entries(judgesUpdated).slice(0, 3).map(([k, v]) => [k, v.mapped])
+                    ),
+                });
+                studentResults = await this._batchCalculateStudentScores(sessionId, freshSnapshot, client);
+                if (studentResults.length > 0) {
+                    await client.query(
+                        `UPDATE final_student_results SET scale_max = $1 WHERE session_id = $2`,
+                        [scaleMax, sessionId]
+                    );
+                }
+                logger.info("CredibilityService: First-session protection complete", {
+                    sessionId, studentsRescored: studentResults.length,
+                });
+            }
+
             // Step 4: Seal Session
             await client.query(
                 `UPDATE faculty_evaluation_sessions
@@ -548,6 +798,7 @@ class CredibilityService {
                 studentsScored: studentResults.length,
                 pipeline: "advanced_rubric",
                 judges: judgesUpdated,
+                firstSessionProtection: isFirstSession,
             };
         } catch (error) {
             await client.query("ROLLBACK");

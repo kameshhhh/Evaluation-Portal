@@ -16,6 +16,7 @@ const logger = require("../utils/logger");
 const sessionPlannerService = require("../services/sessionPlannerService");
 const facultyScopeService = require("../services/facultyScopeService");
 const GovernanceService = require("../services/GovernanceService");
+const { batchToYearLabel, admissionToBatch, formatBatch } = require("../utils/batchHelper");
 const {
   broadcastChange,
   emitToAll,
@@ -50,11 +51,12 @@ function getSuffix(n) {
   return "th";
 }
 
-// Helper: get year label from admission_year
+// Helper: get year label from admission_year (batch-aware)
+// batch_year = admission_year + 4, then derive label from current academic year
 function getYearLabel(admissionYear) {
-  const yr = new Date().getFullYear() - admissionYear;
-  if (yr >= 4) return "Final year";
-  return `${yr}${getSuffix(yr)} year`;
+  if (!admissionYear) return "Unknown";
+  const batchYear = admissionToBatch(admissionYear);
+  return batchToYearLabel(batchYear) || `Batch ${batchYear}`;
 }
 
 // ============================================================
@@ -297,12 +299,13 @@ const createTeam = async (req, res) => {
       });
     }
 
-    // Get leader's admission_year for same-year enforcement
+    // Get leader's batch year (graduation_year) for same-batch enforcement
     const leaderPersonInfo = await client.query(
-      `SELECT admission_year FROM persons WHERE person_id = $1`,
+      `SELECT admission_year, graduation_year FROM persons WHERE person_id = $1`,
       [leaderId],
     );
     const leaderAdmissionYear = leaderPersonInfo.rows[0]?.admission_year;
+    const leaderBatchYear = leaderPersonInfo.rows[0]?.graduation_year || admissionToBatch(leaderAdmissionYear);
 
     // ── STRICT SAME-TRACK + SAME-YEAR ENFORCEMENT ──
     // Verify ALL invited members have the exact same track AND same admission_year.
@@ -340,31 +343,22 @@ const createTeam = async (req, res) => {
         });
       }
 
-      // Check all members are from the SAME YEAR as the leader
+      // Check all members are from the SAME BATCH as the leader
       const wrongYear = memberCheck.rows.filter(
         (r) => r.admission_year !== leaderAdmissionYear,
       );
       if (wrongYear.length > 0) {
-        const currentYear = new Date().getFullYear();
         const names = wrongYear
           .map((r) => {
-            const yr = r.admission_year ? currentYear - r.admission_year : "?";
-            const label =
-              yr === 4
-                ? "Final year"
-                : yr === 3
-                  ? "3rd year"
-                  : yr === 2
-                    ? "2nd year"
-                    : yr === 1
-                      ? "1st year"
-                      : `${yr}yr`;
-            return `${r.display_name} (${label})`;
+            const memberBatch = admissionToBatch(r.admission_year);
+            const label = memberBatch ? batchToYearLabel(memberBatch) : "?";
+            return `${r.display_name} (${label || 'Batch ' + memberBatch})`;
           })
           .join(", ");
+        const leaderLabel = batchToYearLabel(leaderBatchYear) || `Batch ${leaderBatchYear}`;
         return res.status(400).json({
           success: false,
-          error: `Cross-year teams are not allowed. You are ${currentYear - leaderAdmissionYear === 4 ? "Final" : currentYear - leaderAdmissionYear + getSuffix(currentYear - leaderAdmissionYear)} year. These members are from a different year: ${names}`,
+          error: `Cross-batch teams are not allowed. You are ${leaderLabel} (Batch ${leaderBatchYear}). These members are from a different batch: ${names}`,
         });
       }
     }
@@ -380,6 +374,35 @@ const createTeam = async (req, res) => {
       return res
         .status(409)
         .json({ success: false, error: "You already have an active team." });
+    }
+
+    // Check invited members aren't already in active teams
+    if (memberIds?.length > 0) {
+      const memberTeamCheck = await client.query(
+        `SELECT ti.invitee_id, p.display_name
+         FROM team_invitations ti
+         JOIN team_formation_requests tfr ON tfr.id = ti.formation_id
+         JOIN persons p ON p.person_id = ti.invitee_id
+         WHERE ti.invitee_id = ANY($1)
+           AND tfr.academic_year = $2 AND tfr.semester = $3
+           AND tfr.status IN ('pending', 'members_accepted', 'admin_approved')
+           AND ti.status IN ('pending', 'accepted')
+         UNION
+         SELECT tfr.leader_id, p.display_name
+         FROM team_formation_requests tfr
+         JOIN persons p ON p.person_id = tfr.leader_id
+         WHERE tfr.leader_id = ANY($1)
+           AND tfr.academic_year = $2 AND tfr.semester = $3
+           AND tfr.status IN ('pending', 'members_accepted', 'admin_approved')`,
+        [memberIds, academicYear, semester],
+      );
+      if (memberTeamCheck.rows.length > 0) {
+        const names = memberTeamCheck.rows.map(r => r.display_name).join(', ');
+        return res.status(409).json({
+          success: false,
+          error: `These members already belong to an active team: ${names}`,
+        });
+      }
     }
 
     await client.query("BEGIN");
@@ -979,6 +1002,7 @@ const getPlannerOverview = async (req, res) => {
     const studentsRes = await query(
       `SELECT 
          p.person_id, p.display_name, p.department_code, p.admission_year,
+         p.graduation_year AS batch_year,
          sts.track,
          tfr.id as formation_id, tfr.status as team_status,
          tfr.project_id,
@@ -1030,7 +1054,7 @@ const getPlannerOverview = async (req, res) => {
            )
          )
        ORDER BY p.display_name`,
-      [sessionId, req.user.role, req.user.personId || null],
+      [sessionId, req.user.role, req.user.userId || null],
     );
     const students = studentsRes.rows;
 
@@ -1041,6 +1065,7 @@ const getPlannerOverview = async (req, res) => {
          sp.display_name as student_name,
          sp.department_code as student_department,
          sp.admission_year as student_admission_year,
+         sp.graduation_year as student_batch_year,
          fp.display_name as faculty_name,
          prj.title as project_title,
          assigner.display_name as assigned_by_name,
@@ -1094,6 +1119,14 @@ const assignFaculty = async (req, res) => {
         success: false,
         error: "Session ID, Faculty ID, and Student IDs (array) are required"
       });
+    }
+
+    // Guard: cannot assign faculty to a finalized session
+    const sesStatusCheck = await query(
+      `SELECT status FROM faculty_evaluation_sessions WHERE id = $1`, [sessionId]
+    );
+    if (sesStatusCheck.rows[0]?.status === 'FINALIZED') {
+      return res.status(409).json({ success: false, error: "Session is already finalized. Cannot assign faculty." });
     }
 
     // --- GOVERNANCE: Weekly Window Enforcement ---
@@ -1275,30 +1308,52 @@ const unassignStudent = async (req, res) => {
       });
     }
 
-    // Can only remove if evaluation is done OR not started (adjust logic as needed)
-    // Here allowing removal if 'assigned' or 'completed' per original logic
-    if (a.status === "assigned" || a.status === "completed") {
-      await query(
-        `UPDATE session_planner_assignments SET status = 'removed', updated_at = NOW()
-         WHERE id = $1`,
-        [a.id],
+    // Can only remove if 'assigned', 'completed', or 'evaluation_done' (admin only for evaluation_done)
+    if (a.status === "assigned" || a.status === "completed" || (a.status === "evaluation_done" && callerRole === "admin")) {
+
+      // Team Sync: Find teammates via project_members (mirror of assignFaculty)
+      const teamMembers = await query(
+        `WITH MemberTeam AS (
+           SELECT project_id FROM project_members WHERE person_id = $1
+         )
+         SELECT pm.person_id
+         FROM project_members pm
+         JOIN MemberTeam mt ON pm.project_id = mt.project_id
+         JOIN projects p ON p.project_id = pm.project_id
+         WHERE p.status = 'active'`,
+        [studentId]
       );
 
-      broadcastChange("session_planner", "unassigned", {
-        sessionId,
-        studentId,
-        facultyId: a.faculty_id,
-      });
+      const studentsToUnassign = teamMembers.rows.length > 0
+        ? teamMembers.rows.map(r => r.person_id)
+        : [studentId];
+
+      // Unassign all team members from this faculty in this session
+      const unassignResult = await query(
+        `UPDATE session_planner_assignments SET status = 'removed', updated_at = NOW()
+         WHERE session_id = $1 AND faculty_id = $2 AND student_id = ANY($3::uuid[])
+           AND status IN ('assigned', 'completed'${callerRole === 'admin' ? ", 'evaluation_done'" : ''})`,
+        [sessionId, facultyId, studentsToUnassign],
+      );
+
+      for (const sId of studentsToUnassign) {
+        broadcastChange("session_planner", "unassigned", {
+          sessionId,
+          studentId: sId,
+          facultyId: a.faculty_id,
+        });
+      }
 
       // Also emit socket event for real-time UI updates
       const io = require("../socket").getIO();
       io.to(`session:${sessionId}`).emit("assignment:removed", {
         sessionId,
-        studentId,
+        studentIds: studentsToUnassign,
         facultyId: a.faculty_id
       });
 
-      return res.json({ success: true, message: "Student unassigned." });
+      const count = unassignResult.rowCount || 1;
+      return res.json({ success: true, message: `Unassigned ${count} student(s) (including teammates).` });
     }
 
     return res.status(400).json({
@@ -1442,6 +1497,7 @@ const getAllStudents = async (req, res) => {
     const result = await query(
       `SELECT 
          p.person_id, p.display_name, p.department_code, p.admission_year,
+         p.graduation_year AS batch_year,
          sts.track, sts.academic_year, sts.semester,
          tfr.id as formation_id, tfr.status as team_status, tfr.project_id,
          prj.title as project_title,
@@ -1471,7 +1527,7 @@ const getAllStudents = async (req, res) => {
            )
          )
        ORDER BY p.display_name`,
-      [req.user.role, req.user.personId || null]
+      [req.user.role, req.user.userId || null]
     );
 
     return res.json({ success: true, data: result.rows });
@@ -1511,10 +1567,10 @@ async function _createSoloTeam(personId, academicYear, semester) {
       [proj.rows[0].project_id, personId],
     );
 
-    // Create auto-approved formation
+    // Create auto-approved formation (solo = no members to accept, skip to admin_approved)
     await client.query(
       `INSERT INTO team_formation_requests (project_id, leader_id, track, academic_year, semester, status)
-       VALUES ($1, $2, 'it_core', $3, $4, 'members_accepted')`,
+       VALUES ($1, $2, 'it_core', $3, $4, 'admin_approved')`,
       [proj.rows[0].project_id, personId, academicYear, semester],
     );
 
@@ -1576,6 +1632,14 @@ const submitMarks = async (req, res) => {
       }
     }
 
+    // Guard: cannot submit marks on a finalized session
+    const sessionStatusCheck = await query(
+      `SELECT status FROM faculty_evaluation_sessions WHERE id = $1`, [sessionId]
+    );
+    if (sessionStatusCheck.rows[0]?.status === 'FINALIZED') {
+      return res.status(409).json({ success: false, error: "Session is already finalized. Marks cannot be submitted." });
+    }
+
     // Validate zero feedback for rubrics with 0 marks
     const zeroRubrics = Object.entries(rubricMarks).filter(([, m]) => Number(m) === 0);
     if (zeroRubrics.length > 0) {
@@ -1634,84 +1698,86 @@ const submitMarks = async (req, res) => {
       });
     }
 
-    // --- Per-team scarcity pool validation ---
-    // Pool = team_members_assigned × 5 per rubric (with floor+remainder)
-    const effectiveFacultyId = a.faculty_id;
-
-    // Find all students assigned to this faculty in this session that share this student's team
-    const teamInfo = await query(
-      `SELECT spa.student_id, spa.marks, spa.marks_submitted_at, spa.rubric_marks,
-              spa.team_formation_id
-       FROM session_planner_assignments spa
-       WHERE spa.session_id = $1 AND spa.faculty_id = $2 AND spa.status != 'removed'`,
-      [sessionId, effectiveFacultyId]
-    );
-
-    const allAssignments = teamInfo.rows;
-    const thisStudentRow = allAssignments.find(r => r.student_id === studentId);
-    const teamFormationId = thisStudentRow?.team_formation_id;
-
-    // Get team members assigned to this faculty that share this student's team
-    // Solo (no team): pool = 1 × 5 = 5 per individual student
-    // Team: pool = teamSize × 5 shared across team members
-    const teamAssignments = teamFormationId
-      ? allAssignments.filter(r => r.team_formation_id === teamFormationId)
-      : [thisStudentRow || { student_id: studentId }];
-
-    const teamSize = teamAssignments.length;
-    const rubricCount = rubricIds.length;
-    const teamPool = teamSize * MAX_MARKS_PER_RUBRIC;
-
-    // Compute per-rubric pool: floor + remainder distributed alphabetically
-    // Sort rubrics by name for consistent remainder distribution
-    const rubricNamesRes = await query(
-      `SELECT head_id, head_name FROM evaluation_heads WHERE head_id = ANY($1::uuid[])
-       ORDER BY head_name ASC`,
-      [rubricIds]
-    );
-    const sortedRubricIds = rubricNamesRes.rows.map(r => r.head_id);
-    // Fallback if rubric names can't be fetched
-    const orderedRubrics = sortedRubricIds.length > 0 ? sortedRubricIds : [...rubricIds].sort();
-
-    const basePool = Math.floor(teamPool / rubricCount);
-    const remainder = teamPool - (basePool * rubricCount);
-    const rubricPools = {};
-    orderedRubrics.forEach((rid, idx) => {
-      rubricPools[rid] = basePool + (idx < remainder ? 1 : 0);
-    });
-
-    // Calculate used marks per rubric across team
-    const usedPerRubric = {};
-    orderedRubrics.forEach(rid => { usedPerRubric[rid] = 0; });
-
-    for (const ta of teamAssignments) {
-      if (ta.marks_submitted_at && ta.rubric_marks && ta.student_id !== studentId) {
-        const rm = typeof ta.rubric_marks === 'string' ? JSON.parse(ta.rubric_marks) : ta.rubric_marks;
-        for (const [rid, marks] of Object.entries(rm)) {
-          usedPerRubric[rid] = (usedPerRubric[rid] || 0) + Number(marks);
-        }
-      }
-    }
-
-    // Validate each rubric against its pool
-    for (const [rubricId, mark] of Object.entries(rubricMarks)) {
-      const numMark = Number(mark);
-      const pool = rubricPools[rubricId] || (teamPool / rubricCount);
-      const used = usedPerRubric[rubricId] || 0;
-      const remaining = pool - used;
-      if (numMark > remaining) {
-        const rubricName = rubricNamesRes.rows.find(r => r.head_id === rubricId)?.head_name || rubricId;
-        return res.status(400).json({
-          success: false,
-          error: `Exceeds rubric pool for "${rubricName}". Pool: ${pool}, Used: ${used}, Remaining: ${remaining}, Requested: ${numMark}.`,
-        });
-      }
-    }
-
-    // --- Submit marks (Event Sourcing + State Update) ---
+    // --- Submit marks with pool validation inside transaction (atomic) ---
     const client = await require("../config/database").pool.connect();
+    // Declare variables at outer scope so they remain accessible after the transaction
+    let effectiveFacultyId;
+    let orderedRubrics;
+    let rubricPools = {};
+    let usedPerRubric = {};
+    let rubricNamesRes;
     try {
       await client.query("BEGIN");
+
+      // --- Per-team scarcity pool validation (inside txn with row locking) ---
+      effectiveFacultyId = a.faculty_id;
+
+      // Lock team assignments with FOR UPDATE to prevent concurrent pool breaches
+      const teamInfo = await client.query(
+        `SELECT spa.student_id, spa.marks, spa.marks_submitted_at, spa.rubric_marks,
+                spa.team_formation_id
+         FROM session_planner_assignments spa
+         WHERE spa.session_id = $1 AND spa.faculty_id = $2 AND spa.status != 'removed'
+         FOR UPDATE`,
+        [sessionId, effectiveFacultyId]
+      );
+
+      const allAssignments = teamInfo.rows;
+      const thisStudentRow = allAssignments.find(r => r.student_id === studentId);
+      const teamFormationId = thisStudentRow?.team_formation_id;
+
+      const teamAssignments = teamFormationId
+        ? allAssignments.filter(r => r.team_formation_id === teamFormationId)
+        : [thisStudentRow || { student_id: studentId }];
+
+      const teamSize = teamAssignments.length;
+      const rubricCount = rubricIds.length;
+      const teamPool = teamSize * MAX_MARKS_PER_RUBRIC;
+
+      // Sort rubrics by name for consistent remainder distribution
+      rubricNamesRes = await client.query(
+        `SELECT head_id, head_name FROM evaluation_heads WHERE head_id = ANY($1::uuid[])
+         ORDER BY head_name ASC`,
+        [rubricIds]
+      );
+      const sortedRubricIds = rubricNamesRes.rows.map(r => r.head_id);
+      orderedRubrics = sortedRubricIds.length > 0 ? sortedRubricIds : [...rubricIds].sort();
+
+      const basePool = Math.floor(teamPool / rubricCount);
+      const poolRemainder = teamPool - (basePool * rubricCount);
+      rubricPools = {};
+      orderedRubrics.forEach((rid, idx) => {
+        rubricPools[rid] = basePool + (idx < poolRemainder ? 1 : 0);
+      });
+
+      // Calculate used marks per rubric across team
+      usedPerRubric = {};
+      orderedRubrics.forEach(rid => { usedPerRubric[rid] = 0; });
+
+      for (const ta of teamAssignments) {
+        if (ta.marks_submitted_at && ta.rubric_marks && ta.student_id !== studentId) {
+          const rm = typeof ta.rubric_marks === 'string' ? JSON.parse(ta.rubric_marks) : ta.rubric_marks;
+          for (const [rid, marks] of Object.entries(rm)) {
+            usedPerRubric[rid] = (usedPerRubric[rid] || 0) + Number(marks);
+          }
+        }
+      }
+
+      // Validate each rubric against its pool
+      for (const [rubricId, mark] of Object.entries(rubricMarks)) {
+        const numMark = Number(mark);
+        const pool = rubricPools[rubricId] || (teamPool / rubricCount);
+        const used = usedPerRubric[rubricId] || 0;
+        const remaining = pool - used;
+        if (numMark > remaining) {
+          await client.query("ROLLBACK");
+          const rubricName = rubricNamesRes.rows.find(r => r.head_id === rubricId)?.head_name || rubricId;
+          // Do NOT call client.release() here — finally block handles it
+          throw Object.assign(new Error(`Exceeds rubric pool for "${rubricName}". Pool: ${pool}, Used: ${used}, Remaining: ${remaining}, Requested: ${numMark}.`), { statusCode: 400 });
+        }
+      }
+
+      // --- Pool OK → submit marks (Event Sourcing + State Update) ---
 
       // 1. Log Event
       await client.query(
@@ -1739,7 +1805,8 @@ const submitMarks = async (req, res) => {
 
       await client.query("COMMIT");
     } catch (txError) {
-      await client.query("ROLLBACK");
+      // Pool validation errors already rolled back; guard against double-rollback
+      try { await client.query("ROLLBACK"); } catch (_) { /* already rolled back */ }
       logger.error("submitMarks transaction failed", { error: txError.message });
       throw txError;
     } finally {
@@ -1827,6 +1894,10 @@ const submitMarks = async (req, res) => {
       },
     });
   } catch (error) {
+    // Pool validation errors have a statusCode (e.g. 400)
+    if (error.statusCode) {
+      return res.status(error.statusCode).json({ success: false, error: error.message });
+    }
     logger.error("Failed to submit marks", { error: error.message, stack: error.stack });
     return res.status(500).json({ success: false, error: "Failed to submit marks." });
   }
@@ -1855,6 +1926,7 @@ const getMySessions = async (req, res) => {
          fes.closes_at,
          fes.academic_year,
          fes.semester,
+         fes.batch_year,
          fes.venue,
          fes.session_date,
          fes.session_time,
@@ -1884,6 +1956,7 @@ const getMySessions = async (req, res) => {
            p.display_name,
            p.department_code,
            p.admission_year,
+           p.graduation_year AS batch_year,
            u.normalized_email AS email,
            sts.track,
            COALESCE(tfr.id, tfr2.id)             AS team_id,
@@ -1976,11 +2049,15 @@ const getSessionHistory = async (req, res) => {
          fes.session_date,
          fes.session_time,
          fes.created_at,
+         fes.group_id,
+         fes.track,
+         sg.title            AS group_title,
          COALESCE(stats.total_assignments, 0)   AS total_assignments,
          COALESCE(stats.assigned_students, 0)    AS assigned_students,
          COALESCE(stats.faculty_count, 0)        AS faculty_count,
          COALESCE(student_count.cnt, 0)          AS total_students
        FROM faculty_evaluation_sessions fes
+       LEFT JOIN session_groups sg ON sg.id = fes.group_id
        LEFT JOIN LATERAL (
          SELECT
            COUNT(*)                                AS total_assignments,
@@ -2163,7 +2240,7 @@ const setSchedule = async (req, res) => {
 
     // Also notify each student individually
     for (const sid of validIds) {
-      emitToPerson(sid, "schedule_updated", {
+      emitToPerson("schedule_updated", sid, {
         sessionId,
         facultyId,
         date,
@@ -2444,6 +2521,8 @@ const testAutoAssign = async (req, res) => {
       count: result.count,
       rubricIds,
       minJudges,
+      track: result.track || null,
+      warnings: result.warnings || [],
     });
 
   } catch (error) {
@@ -2464,8 +2543,16 @@ const resetTestAssignments = async (req, res) => {
     const { sessionId } = req.body || {};
 
     // Delete assignments (scoped to session if provided)
+    // Must delete child rows in assignment_score_events first (FK constraint)
     let result;
     if (sessionId) {
+      // Delete dependent score events for test_auto assignments in this session
+      await query(`
+          DELETE FROM assignment_score_events
+          WHERE assignment_id IN (
+            SELECT id FROM session_planner_assignments
+            WHERE session_id = $1 AND assignment_source = 'test_auto'
+          )`, [sessionId]);
       result = await query(`
           DELETE FROM session_planner_assignments
           WHERE session_id = $1 AND assignment_source = 'test_auto'
@@ -2480,6 +2567,13 @@ const resetTestAssignments = async (req, res) => {
       const affected = await query(
         `SELECT DISTINCT session_id FROM session_planner_assignments WHERE assignment_source = 'test_auto'`
       );
+      // Delete dependent score events for all test_auto assignments
+      await query(`
+          DELETE FROM assignment_score_events
+          WHERE assignment_id IN (
+            SELECT id FROM session_planner_assignments
+            WHERE assignment_source = 'test_auto'
+          )`);
       result = await query(`
           DELETE FROM session_planner_assignments
           WHERE assignment_source = 'test_auto'
@@ -2551,24 +2645,258 @@ const finalizeSessionManual = async (req, res) => {
     const CredibilityService = require("../services/credibility/CredibilityService");
     const result = await CredibilityService.finalizeSession(sessionId);
 
+    // Run anomaly detection after finalization
+    const anomalyDetectionService = require("../services/anomalyDetectionService");
+    const anomalyResult = await anomalyDetectionService.detectAnomalies(sessionId);
+
     // Broadcast
     emitToRole('planner:update', 'admin', { action: 'finalized', sessionId });
     broadcastChange('session_planner', 'session_completed', { sessionId });
 
+    const protectionNote = result.firstSessionProtection
+      ? " (first-session two-pass protection applied)"
+      : "";
+
     logger.info("Session manually finalized by admin", {
       sessionId,
       adminId: req.user.personId,
-      studentsScored: result.studentsScored
+      studentsScored: result.studentsScored,
+      alertsDetected: anomalyResult.alerts.length,
+      firstSessionProtection: result.firstSessionProtection,
     });
 
     return res.json({
       success: true,
-      message: `Session finalized. ${result.studentsScored} students scored using credibility-weighted aggregation.`,
-      studentsScored: result.studentsScored
+      message: `Session finalized. ${result.studentsScored} students scored using credibility-weighted aggregation${protectionNote}.`,
+      studentsScored: result.studentsScored,
+      alerts: anomalyResult.alerts,
+      firstSessionProtection: result.firstSessionProtection || false,
     });
   } catch (error) {
     logger.error("Manual finalization failed", { error: error.message });
     return res.status(500).json({ success: false, error: error.message });
+  }
+};
+
+// ============================================================
+// SESSION GROUPS — Parent-Child Track-Based Sessions
+// ============================================================
+
+/**
+ * POST /session-groups — Create a session group with one child per track
+ * Body: { month, segment, targetYear, academicYear, semester }
+ *
+ * Creates:
+ *   1. A parent row in session_groups
+ *   2. One faculty_evaluation_sessions row per track (core, it_core, premium)
+ *      each linked via group_id + track column
+ */
+const createSessionGroup = async (req, res) => {
+  try {
+    const {
+      month,       // e.g. "Feb"
+      segment,     // e.g. "S1"
+      targetYear,  // e.g. "Final Year" (legacy, optional)
+      batchYear,   // e.g. 2027 (NEW: permanent batch identifier)
+      academicYear,
+      semester,
+    } = req.body;
+
+    // Accept either batchYear (new) or targetYear (legacy)
+    const effBatchYear = batchYear ? parseInt(batchYear) : null;
+    const effTargetYear = targetYear || (effBatchYear ? batchToYearLabel(effBatchYear) : null);
+
+    if (!month || !segment || (!effBatchYear && !effTargetYear)) {
+      return res.status(400).json({
+        success: false,
+        error: "month, segment and batchYear (or targetYear) are required.",
+      });
+    }
+
+    const createdBy = req.user.personId || req.user.userId;
+    const effAcademicYear = academicYear || new Date().getFullYear();
+    const effSemester = semester || 1;
+    // Title now shows batch year: "Feb S1 - Batch 2027 (Final Year)"
+    const yearDisplay = effBatchYear
+      ? `Batch ${effBatchYear}` 
+      : effTargetYear;
+    const groupTitle = `${month} ${segment} - ${yearDisplay}`;
+
+    // ── Duplicate guard: check if a group with this exact title already exists ──
+    const existingGroup = await query(
+      `SELECT sg.id, sg.title,
+              json_agg(json_build_object(
+                'id', fes.id, 'track', fes.track, 'title', fes.title, 'status', fes.status
+              )) AS sessions
+       FROM session_groups sg
+       JOIN faculty_evaluation_sessions fes ON fes.group_id = sg.id
+       WHERE sg.title = $1
+       GROUP BY sg.id`,
+      [groupTitle],
+    );
+    if (existingGroup.rows.length > 0) {
+      return res.status(200).json({
+        success: true,
+        existed: true,
+        data: existingGroup.rows[0],
+      });
+    }
+
+    // ── Compute session_date from month + segment ──
+    let autoDate = null;
+    const MONTHS = { Jan: 0, Feb: 1, Mar: 2, Apr: 3, May: 4, Jun: 5, Jul: 6, Aug: 7, Sep: 8, Oct: 9, Nov: 10, Dec: 11 };
+    const monthIdx = MONTHS[month];
+    const segNum = parseInt(segment.replace("S", "")) || 1;
+    if (monthIdx !== undefined) {
+      const day = (segNum - 1) * 7 + 1;
+      autoDate = new Date(effAcademicYear, monthIdx, day).toISOString().split("T")[0];
+    }
+
+    // ── 1. Create parent session_group ──
+    const groupRes = await query(
+      `INSERT INTO session_groups (title, session_date, target_year, academic_year, semester, created_by, batch_year)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)
+       RETURNING *`,
+      [groupTitle, autoDate, effTargetYear, effAcademicYear, effSemester, createdBy, effBatchYear],
+    );
+    const group = groupRes.rows[0];
+
+    // ── 2. Create one child session per track ──
+    const TRACKS = ["core", "it_core", "premium"];
+    const TRACK_LABELS = { core: "Core", it_core: "IT & Core", premium: "Premium" };
+    const childSessions = [];
+
+    for (const track of TRACKS) {
+      const childTitle = `${groupTitle} [${TRACK_LABELS[track]}]`;
+      const childDesc = effBatchYear
+        ? `Batch ${effBatchYear} (${effTargetYear || ''}) | Track: ${TRACK_LABELS[track]}`
+        : `Target: ${effTargetYear} | Track: ${TRACK_LABELS[track]}`;
+      const childRes = await query(
+        `INSERT INTO faculty_evaluation_sessions
+           (title, description, evaluation_mode, academic_year, semester, status,
+            created_by, session_date, group_id, track, batch_year)
+         VALUES ($1, $2, 'small_pool', $3, $4, 'active', $5, $6, $7, $8, $9)
+         RETURNING *`,
+        [
+          childTitle,
+          childDesc,
+          effAcademicYear,
+          effSemester,
+          createdBy,
+          autoDate,
+          group.id,
+          track,
+          effBatchYear,
+        ],
+      );
+      childSessions.push(childRes.rows[0]);
+    }
+
+    logger.info("SessionGroup created", {
+      groupId: group.id,
+      title: groupTitle,
+      childCount: childSessions.length,
+      createdBy,
+    });
+
+    broadcastChange("session_group", "created", { groupId: group.id });
+
+    return res.status(201).json({
+      success: true,
+      data: {
+        ...group,
+        sessions: childSessions,
+      },
+    });
+  } catch (err) {
+    logger.error("createSessionGroup error", { error: err.message });
+    return res.status(500).json({ success: false, error: err.message });
+  }
+};
+
+/**
+ * GET /session-groups — List all session groups with their child sessions
+ * Returns groups in reverse chronological order, each with its track sessions.
+ */
+const listSessionGroups = async (req, res) => {
+  try {
+    const groups = await query(
+      `SELECT
+         sg.id              AS group_id,
+         sg.title,
+         sg.session_date,
+         sg.target_year,
+         sg.academic_year,
+         sg.semester,
+         sg.batch_year,
+         sg.created_at,
+         json_agg(
+           json_build_object(
+             'id', fes.id,
+             'title', fes.title,
+             'track', fes.track,
+             'status', fes.status,
+             'session_date', fes.session_date,
+             'auto_suggested', fes.auto_suggested,
+             'finalized_at', fes.finalized_at,
+             'totalAssignments', (SELECT COUNT(*) FROM session_planner_assignments spa WHERE spa.session_id = fes.id AND spa.status != 'removed'),
+             'assignedStudents', (SELECT COUNT(DISTINCT spa.student_id) FROM session_planner_assignments spa WHERE spa.session_id = fes.id AND spa.status != 'removed'),
+             'facultyCount', (SELECT COUNT(DISTINCT spa.faculty_id) FROM session_planner_assignments spa WHERE spa.session_id = fes.id AND spa.status != 'removed')
+           ) ORDER BY fes.track
+         ) AS sessions
+       FROM session_groups sg
+       JOIN faculty_evaluation_sessions fes ON fes.group_id = sg.id
+       GROUP BY sg.id
+       ORDER BY sg.created_at DESC`,
+    );
+
+    return res.json({ success: true, data: groups.rows });
+  } catch (err) {
+    logger.error("listSessionGroups error", { error: err.message });
+    return res.status(500).json({ success: false, error: "Failed to load session groups." });
+  }
+};
+
+/**
+ * GET /session-groups/:groupId — Get a single session group with full details
+ */
+const getSessionGroupDetail = async (req, res) => {
+  try {
+    const { groupId } = req.params;
+
+    const groupRes = await query(
+      `SELECT * FROM session_groups WHERE id = $1`,
+      [groupId],
+    );
+    if (groupRes.rows.length === 0) {
+      return res.status(404).json({ success: false, error: "Session group not found." });
+    }
+    const group = groupRes.rows[0];
+
+    const sessionsRes = await query(
+      `SELECT fes.*,
+              (SELECT COUNT(*) FROM session_planner_assignments spa
+               WHERE spa.session_id = fes.id AND spa.status != 'removed') AS total_assignments,
+              (SELECT COUNT(DISTINCT spa.student_id) FROM session_planner_assignments spa
+               WHERE spa.session_id = fes.id AND spa.status != 'removed') AS assigned_students,
+              (SELECT COUNT(DISTINCT spa.faculty_id) FROM session_planner_assignments spa
+               WHERE spa.session_id = fes.id AND spa.status != 'removed') AS faculty_count
+       FROM faculty_evaluation_sessions fes
+       WHERE fes.group_id = $1
+       ORDER BY fes.track`,
+      [groupId],
+    );
+
+    return res.json({
+      success: true,
+      data: {
+        ...group,
+        sessions: sessionsRes.rows,
+      },
+    });
+  } catch (err) {
+    logger.error("getSessionGroupDetail error", { error: err.message });
+    return res.status(500).json({ success: false, error: "Failed to load session group." });
   }
 };
 
@@ -2610,4 +2938,8 @@ module.exports = {
   resetTestAssignments,
   // Finalization
   finalizeSessionManual,
+  // Session Groups
+  createSessionGroup,
+  listSessionGroups,
+  getSessionGroupDetail,
 };

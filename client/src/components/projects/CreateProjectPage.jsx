@@ -23,6 +23,7 @@ import {
   UserPlus,
 } from "lucide-react";
 import { createProject, searchPersons } from "../../services/projectService";
+import { getYearLabel } from "../../utils/yearUtils";
 import useAuth from "../../hooks/useAuth";
 
 const CreateProjectPage = () => {
@@ -533,7 +534,7 @@ const CreateProjectPage = () => {
                                 <p className="text-xs text-gray-400">
                                   {person.departmentCode}
                                   {person.admissionYear
-                                    ? ` • ${person.admissionYear}`
+                                    ? ` • ${getYearLabel(person.admissionYear) || person.admissionYear}`
                                     : ""}
                                 </p>
                               </div>

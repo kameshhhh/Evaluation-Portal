@@ -12,6 +12,7 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import useAuth from "../../hooks/useAuth";
+import { getYearLabel } from "../../utils/yearUtils";
 import { getInitials } from "../../utils/helpers";
 import TrackSelectionModal from "./student/TrackSelectionModal";
 import {
@@ -195,9 +196,9 @@ const StudentDashboard = ({ data, onRefresh }) => {
         />
       )}
 
-      <main className="max-w-6xl mx-auto px-4 py-8">
+      <main className="w-full mx-auto px-4 sm:px-6 py-5">
         {/* WELCOME HEADER */}
-        <div className="flex items-center justify-between mb-8">
+        <div className="flex items-center justify-between mb-5">
           <div className="flex items-center gap-4">
             {profilePicture ? (
               <img
@@ -217,8 +218,8 @@ const StudentDashboard = ({ data, onRefresh }) => {
                 Welcome, {displayName.split(" ")[0]}
               </h1>
               <p className="text-gray-500 mt-1">
-                {user?.departmentName || user?.department || "Department"} •
-                Batch of {user?.admissionYear || "N/A"}
+                {user?.departmentName || user?.department || "Department"} •{" "}
+                {getYearLabel(user?.admissionYear) || `Batch of ${user?.admissionYear || "N/A"}`}
                 {user?.graduationYear ? ` – ${user.graduationYear}` : ""}
               </p>
             </div>
