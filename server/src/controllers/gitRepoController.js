@@ -17,6 +17,8 @@
 
 const GitRepositoryService = require("../services/GitRepositoryService");
 const ActivityStreamService = require("../services/ActivityStreamService");
+const pool = require("../config/database");
+const { emitToProject, EVENTS } = require("../socket");
 const logger = require("../utils/logger");
 
 // ============================================================
@@ -48,7 +50,7 @@ const getFile = async (req, res, next) => {
         .status(400)
         .json({ success: false, error: "path query required" });
     }
-    const file = await GitRepositoryService.getFile(projectId, filePath);
+    const file = await GitRepositoryService.getFile(projectId, filePath, req.query.branch || "main");
     if (!file) {
       return res.status(404).json({ success: false, error: "File not found" });
     }
@@ -74,7 +76,7 @@ const commitFile = async (req, res, next) => {
     const commit = await GitRepositoryService.commitFile(
       projectId,
       authorId,
-      { filePath, fileName, content, mimeType, branch },
+      { filePath, fileName, content, mimeType, branch, expectedHead: req.body.expectedHead },
       message,
     );
 
@@ -84,6 +86,15 @@ const commitFile = async (req, res, next) => {
       targetType: "file",
       targetName: filePath,
       data: { commitHash: commit.commit_hash, message, filePath },
+    });
+
+    // Real-time notification to project members
+    emitToProject(EVENTS.REPO_FILE_COMMITTED, projectId, {
+      commit,
+      filePath,
+      actorId: authorId,
+      headHash: commit.commit_hash,
+      branch: commit.branch,
     });
 
     res.status(201).json({ success: true, data: commit });
@@ -96,7 +107,7 @@ const deleteFile = async (req, res, next) => {
   try {
     const { projectId } = req.params;
     const authorId = req.user?.personId || req.user?.userId;
-    const { filePath, message } = req.body;
+    const { filePath, message, branch } = req.body;
 
     if (!filePath) {
       return res
@@ -109,6 +120,7 @@ const deleteFile = async (req, res, next) => {
       authorId,
       filePath,
       message,
+      branch || "main",
     );
 
     await ActivityStreamService.logActivity(projectId, authorId, {
@@ -116,6 +128,11 @@ const deleteFile = async (req, res, next) => {
       targetType: "file",
       targetName: filePath,
       data: { filePath },
+    });
+
+    emitToProject(EVENTS.REPO_FILE_DELETED, projectId, {
+      filePath,
+      actorId: authorId,
     });
 
     res.json({ success: true, data: result });
@@ -152,6 +169,7 @@ const getCommits = async (req, res, next) => {
     const filters = {
       branch: req.query.branch || undefined,
       authorId: req.query.authorId || undefined,
+      sinceHash: req.query.sinceHash || undefined,
       limit: req.query.limit ? parseInt(req.query.limit, 10) : 50,
       offset: req.query.offset ? parseInt(req.query.offset, 10) : undefined,
     };
@@ -159,7 +177,24 @@ const getCommits = async (req, res, next) => {
       req.params.projectId,
       filters,
     );
-    res.json({ success: true, data: commits });
+
+    // Count total commits for pagination (without limit/offset)
+    const countFilters = { ...filters };
+    delete countFilters.limit;
+    delete countFilters.offset;
+    const allCommits = await GitRepositoryService.getCommits(
+      req.params.projectId,
+      countFilters,
+    );
+
+    res.json({
+      success: true,
+      data: commits,
+      total: allCommits.length,
+      hasMore: filters.offset != null
+        ? (filters.offset + commits.length) < allCommits.length
+        : commits.length < allCommits.length,
+    });
   } catch (error) {
     next(error);
   }
@@ -222,6 +257,11 @@ const createBranch = async (req, res, next) => {
       data: { branchName, fromBranch: fromBranch || "main" },
     });
 
+    emitToProject(EVENTS.REPO_BRANCH_CREATED, req.params.projectId, {
+      branch,
+      actorId: createdBy,
+    });
+
     res.status(201).json({ success: true, data: branch });
   } catch (error) {
     next(error);
@@ -234,6 +274,11 @@ const deleteBranch = async (req, res, next) => {
       req.params.projectId,
       req.params.branchName,
     );
+
+    emitToProject(EVENTS.REPO_BRANCH_DELETED, req.params.projectId, {
+      branchName: req.params.branchName,
+    });
+
     res.json({ success: true, data: result });
   } catch (error) {
     next(error);
@@ -259,6 +304,11 @@ const createIssue = async (req, res, next) => {
       targetId: issue.issue_id,
       targetName: `#${issue.issue_number} ${issue.title}`,
       data: { issueNumber: issue.issue_number, title: issue.title },
+    });
+
+    emitToProject(EVENTS.REPO_ISSUE_CREATED, req.params.projectId, {
+      issue,
+      actorId: reporterId,
     });
 
     res.status(201).json({ success: true, data: issue });
@@ -319,6 +369,11 @@ const updateIssue = async (req, res, next) => {
       data: { issueNumber: issue.issue_number, changes: Object.keys(req.body) },
     });
 
+    emitToProject(EVENTS.REPO_ISSUE_UPDATED, issue.project_id, {
+      issue,
+      actorId,
+    });
+
     res.json({ success: true, data: issue });
   } catch (error) {
     next(error);
@@ -348,6 +403,11 @@ const createPullRequest = async (req, res, next) => {
         title: pr.title,
         sourceBranch: pr.source_branch,
       },
+    });
+
+    emitToProject(EVENTS.REPO_PR_CREATED, req.params.projectId, {
+      pr,
+      actorId: authorId,
     });
 
     res.status(201).json({ success: true, data: pr });
@@ -389,6 +449,11 @@ const updatePullRequest = async (req, res, next) => {
       data: { prNumber: pr.pr_number, changes: Object.keys(req.body) },
     });
 
+    emitToProject(EVENTS.REPO_PR_UPDATED, pr.project_id, {
+      pr,
+      actorId,
+    });
+
     res.json({ success: true, data: pr });
   } catch (error) {
     next(error);
@@ -409,6 +474,12 @@ const addPrComment = async (req, res, next) => {
       authorId,
       comment,
     );
+
+    emitToProject(EVENTS.REPO_PR_COMMENTED, pr.project_id, {
+      prId: req.params.prId,
+      actorId: authorId,
+    });
+
     res.json({ success: true, data: pr });
   } catch (error) {
     next(error);
@@ -480,16 +551,270 @@ const getRepoStats = async (req, res, next) => {
   }
 };
 
+const pushFiles = async (req, res, next) => {
+  try {
+    const { projectId } = req.params;
+    const authorId = req.user?.personId || req.user?.userId;
+    const { files, message, branch } = req.body;
+
+    if (!files || !Array.isArray(files) || files.length === 0) {
+      return res.status(400).json({
+        success: false,
+        error: "files array is required and must not be empty",
+      });
+    }
+
+    if (!message) {
+      return res.status(400).json({
+        success: false,
+        error: "commit message is required",
+      });
+    }
+
+    // Validate each file has a path and content
+    for (const f of files) {
+      if (!f.filePath) {
+        return res.status(400).json({
+          success: false,
+          error: `Each file must have a filePath`,
+        });
+      }
+    }
+
+    const commit = await GitRepositoryService.batchCommitFiles(
+      projectId,
+      authorId,
+      files,
+      message,
+      branch || "main",
+      req.body.expectedHead || null,
+    );
+
+    // Log activity
+    await ActivityStreamService.logActivity(projectId, authorId, {
+      activityType: "commit",
+      targetType: "push",
+      targetName: `${files.length} files`,
+      data: {
+        commitHash: commit.commit_hash,
+        message,
+        fileCount: files.length,
+        filePaths: files.map((f) => f.filePath),
+      },
+    });
+
+    // Real-time notification
+    emitToProject(EVENTS.REPO_FILE_COMMITTED, projectId, {
+      commit,
+      fileCount: files.length,
+      actorId: authorId,
+      headHash: commit.commit_hash,
+      branch: commit.branch,
+    });
+
+    res.status(201).json({ success: true, data: commit });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// ============================================================
+// ISSUE COMMENT HANDLERS
+// ============================================================
+
+const getIssueComments = async (req, res, next) => {
+  try {
+    const comments = await GitRepositoryService.getIssueComments(req.params.issueId);
+    res.json({ success: true, data: comments });
+  } catch (error) {
+    next(error);
+  }
+};
+
+const addIssueComment = async (req, res, next) => {
+  try {
+    const authorId = req.user?.personId || req.user?.userId;
+    const { body } = req.body;
+    if (!body) {
+      return res.status(400).json({ success: false, error: "body required" });
+    }
+    const comment = await GitRepositoryService.addIssueComment(
+      req.params.issueId,
+      authorId,
+      body,
+    );
+
+    // Get the issue to log activity and emit
+    const issue = await GitRepositoryService.getIssue(req.params.issueId);
+    if (issue) {
+      await ActivityStreamService.logActivity(issue.project_id, authorId, {
+        activityType: "issue_comment",
+        targetType: "issue",
+        targetId: issue.issue_id,
+        targetName: `#${issue.issue_number} ${issue.title}`,
+        data: { issueNumber: issue.issue_number },
+      });
+
+      emitToProject(EVENTS.REPO_ISSUE_UPDATED, issue.project_id, {
+        issue,
+        actorId: authorId,
+      });
+    }
+
+    res.status(201).json({ success: true, data: comment });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// ============================================================
+// PR REVIEW HANDLERS
+// ============================================================
+
+const submitPrReview = async (req, res, next) => {
+  try {
+    const reviewerId = req.user?.personId || req.user?.userId;
+    const { status, body } = req.body;
+    if (!status) {
+      return res.status(400).json({ success: false, error: "status required (approved, changes_requested, commented)" });
+    }
+    const review = await GitRepositoryService.submitPrReview(
+      req.params.prId,
+      reviewerId,
+      { status, body },
+    );
+
+    // Get PR for activity logging
+    const prs = await pool.query("SELECT * FROM pull_requests WHERE pr_id = $1", [req.params.prId]);
+    const pr = prs.rows[0];
+    if (pr) {
+      await ActivityStreamService.logActivity(pr.project_id, reviewerId, {
+        activityType: "pr_review",
+        targetType: "pull_request",
+        targetId: pr.pr_id,
+        targetName: `#${pr.pr_number} ${pr.title}`,
+        data: { prNumber: pr.pr_number, reviewStatus: status },
+      });
+
+      emitToProject(EVENTS.REPO_PR_UPDATED, pr.project_id, {
+        pr,
+        actorId: reviewerId,
+      });
+    }
+
+    res.status(201).json({ success: true, data: review });
+  } catch (error) {
+    next(error);
+  }
+};
+
+const getPrReviews = async (req, res, next) => {
+  try {
+    const reviews = await GitRepositoryService.getPrReviews(req.params.prId);
+    res.json({ success: true, data: reviews });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// ============================================================
+// FILE DIFF HANDLER
+// ============================================================
+
+const getCommitDiff = async (req, res, next) => {
+  try {
+    const diff = await GitRepositoryService.getCommitDiff(
+      req.params.projectId,
+      req.params.commitHash,
+    );
+    if (!diff) {
+      return res.status(404).json({ success: false, error: "Commit not found" });
+    }
+    res.json({ success: true, data: diff });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// ============================================================
+// DIFF BETWEEN TWO COMMITS
+// ============================================================
+
+const diffBetweenCommits = async (req, res, next) => {
+  try {
+    const diff = await GitRepositoryService.diffBetweenCommits(
+      req.params.projectId,
+      req.params.fromHash,
+      req.params.toHash,
+    );
+    if (!diff) {
+      return res.status(404).json({ success: false, error: "One or both commits not found" });
+    }
+    res.json({ success: true, data: diff });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// ============================================================
+// PULL / SYNC HANDLERS
+// ============================================================
+
+const pullCommits = async (req, res, next) => {
+  try {
+    const branch = req.query.branch || "main";
+    const sinceHash = req.query.sinceHash || null;
+    const result = await GitRepositoryService.pullCommits(
+      req.params.projectId,
+      branch,
+      sinceHash,
+    );
+    res.json({ success: true, data: result });
+  } catch (error) {
+    next(error);
+  }
+};
+
+const getSyncStatus = async (req, res, next) => {
+  try {
+    const branch = req.query.branch || "main";
+    const clientHash = req.query.clientHash || null;
+    const status = await GitRepositoryService.getSyncStatus(
+      req.params.projectId,
+      branch,
+      clientHash,
+    );
+    res.json({ success: true, data: status });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// ============================================================
+// PROJECT MEMBERS HANDLER
+// ============================================================
+
+const getProjectMembers = async (req, res, next) => {
+  try {
+    const members = await GitRepositoryService.getProjectMembers(req.params.projectId);
+    res.json({ success: true, data: members });
+  } catch (error) {
+    next(error);
+  }
+};
+
 module.exports = {
   // Files
   getFiles,
   getFile,
   commitFile,
+  pushFiles,
   deleteFile,
   getFileHistory,
   // Commits
   getCommits,
   getCommit,
+  getCommitDiff,
   // Branches
   getBranches,
   createBranch,
@@ -499,15 +824,24 @@ module.exports = {
   getIssues,
   getIssue,
   updateIssue,
+  getIssueComments,
+  addIssueComment,
   // Pull requests
   createPullRequest,
   getPullRequests,
   updatePullRequest,
   addPrComment,
+  submitPrReview,
+  getPrReviews,
   // Activity feed
   getActivityFeed,
   getContributionGraph,
   getActivitySummary,
-  // Stats
+  // Stats & members
   getRepoStats,
+  getProjectMembers,
+  // Sync
+  pullCommits,
+  getSyncStatus,
+  diffBetweenCommits,
 };

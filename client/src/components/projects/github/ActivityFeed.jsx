@@ -26,10 +26,16 @@ const ACTIVITY_ICONS = {
   branch_delete: GitBranch,
   issue_create: CircleDot,
   issue_close: CircleDot,
+  issue_update: CircleDot,
+  issue_comment: MessageSquare,
   pr_create: GitPullRequest,
   pr_merge: GitPullRequest,
+  pr_merged: GitPullRequest,
   pr_close: GitPullRequest,
+  pr_closed: GitPullRequest,
   pr_comment: MessageSquare,
+  pr_review: GitPullRequest,
+  pr_update: GitPullRequest,
   file_create: FileCode,
   file_delete: FileCode,
 };
@@ -40,15 +46,21 @@ const ACTIVITY_COLORS = {
   branch_delete: "text-red-500 bg-red-50",
   issue_create: "text-green-600 bg-green-50",
   issue_close: "text-purple-600 bg-purple-50",
+  issue_update: "text-yellow-600 bg-yellow-50",
+  issue_comment: "text-gray-600 bg-gray-50",
   pr_create: "text-green-600 bg-green-50",
   pr_merge: "text-purple-600 bg-purple-50",
+  pr_merged: "text-purple-600 bg-purple-50",
   pr_close: "text-red-500 bg-red-50",
+  pr_closed: "text-red-500 bg-red-50",
   pr_comment: "text-gray-600 bg-gray-50",
+  pr_review: "text-blue-600 bg-blue-50",
+  pr_update: "text-yellow-600 bg-yellow-50",
   file_create: "text-blue-500 bg-blue-50",
   file_delete: "text-red-500 bg-red-50",
 };
 
-const ActivityFeed = ({ projectId }) => {
+const ActivityFeed = ({ projectId, refreshKey }) => {
   const [activities, setActivities] = useState([]);
   const [loading, setLoading] = useState(true);
   const [page, setPage] = useState(1);
@@ -67,7 +79,7 @@ const ActivityFeed = ({ projectId }) => {
 
   useEffect(() => {
     fetchActivities();
-  }, [fetchActivities]);
+  }, [fetchActivities, refreshKey]);
 
   const timeAgo = (dateStr) => {
     if (!dateStr) return "";
@@ -83,25 +95,38 @@ const ActivityFeed = ({ projectId }) => {
   };
 
   const getDescription = (a) => {
+    const d = a.data || {};
     switch (a.activity_type) {
       case "commit":
-        return `committed: ${a.metadata?.message || ""}`;
+        return `committed: ${d.message || ""}`;
       case "branch_create":
-        return `created branch ${a.metadata?.branch || ""}`;
+        return `created branch ${d.branchName || d.branch || ""}`;
       case "branch_delete":
-        return `deleted branch ${a.metadata?.branch || ""}`;
+        return `deleted branch ${d.branchName || d.branch || ""}`;
       case "issue_create":
-        return `opened issue #${a.metadata?.issue_number || ""}: ${a.metadata?.title || ""}`;
+        return `opened issue #${d.issueNumber || d.issue_number || ""}: ${d.title || ""}`;
       case "issue_close":
-        return `closed issue #${a.metadata?.issue_number || ""}`;
+        return `closed issue #${d.issueNumber || d.issue_number || ""}`;
+      case "issue_update":
+        return `updated issue #${d.issueNumber || d.issue_number || ""}`;
+      case "issue_comment":
+        return `commented on issue #${d.issueNumber || d.issue_number || ""}`;
       case "pr_create":
-        return `opened PR #${a.metadata?.pr_number || ""}: ${a.metadata?.title || ""}`;
+        return `opened PR #${d.prNumber || d.pr_number || ""}: ${d.title || ""}`;
+      case "pr_merged":
+        return `merged PR #${d.prNumber || d.pr_number || ""}`;
       case "pr_merge":
-        return `merged PR #${a.metadata?.pr_number || ""}`;
+        return `merged PR #${d.prNumber || d.pr_number || ""}`;
+      case "pr_closed":
+        return `closed PR #${d.prNumber || d.pr_number || ""}`;
       case "pr_close":
-        return `closed PR #${a.metadata?.pr_number || ""}`;
+        return `closed PR #${d.prNumber || d.pr_number || ""}`;
       case "pr_comment":
-        return `commented on PR #${a.metadata?.pr_number || ""}`;
+        return `commented on PR #${d.prNumber || d.pr_number || ""}`;
+      case "pr_review":
+        return `reviewed PR #${d.prNumber || d.pr_number || ""} (${d.reviewStatus || "reviewed"})`;
+      case "file_delete":
+        return `deleted file ${d.filePath || ""}`;
       default:
         return a.activity_type?.replace(/_/g, " ") || "activity";
     }
@@ -171,7 +196,7 @@ const ActivityFeed = ({ projectId }) => {
                       {getDescription(a)}
                     </p>
                     <span className="text-xs text-gray-400">
-                      {timeAgo(a.created_at)}
+                      {timeAgo(a.occurred_at || a.created_at)}
                     </span>
                   </div>
                 </div>

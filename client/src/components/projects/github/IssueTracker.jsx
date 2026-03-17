@@ -15,12 +15,17 @@ import {
   User,
   Clock,
   Loader2,
+  MessageSquare,
+  Send,
 } from "lucide-react";
 import {
   getIssues,
   createIssue,
   updateIssue,
   getIssueDetail,
+  getIssueComments,
+  addIssueComment,
+  getProjectMembers,
 } from "../../../services/gitRepoApi";
 
 const PRIORITY_CONFIG = {
@@ -30,19 +35,30 @@ const PRIORITY_CONFIG = {
   critical: { color: "bg-red-100 text-red-700", label: "Critical" },
 };
 
-const IssueTracker = ({ projectId }) => {
+const IssueTracker = ({ projectId, refreshKey }) => {
   const [issues, setIssues] = useState([]);
   const [loading, setLoading] = useState(true);
   const [statusFilter, setStatusFilter] = useState("open");
   const [showCreate, setShowCreate] = useState(false);
   const [selectedIssue, setSelectedIssue] = useState(null);
   const [creating, setCreating] = useState(false);
+  const [feedback, setFeedback] = useState(null);
+  const [members, setMembers] = useState([]);
+  const [comments, setComments] = useState([]);
+  const [commentText, setCommentText] = useState("");
+  const [commenting, setCommenting] = useState(false);
+
+  const showFeedback = (type, msg) => {
+    setFeedback({ type, msg });
+    setTimeout(() => setFeedback(null), 4000);
+  };
 
   const [form, setForm] = useState({
     title: "",
     description: "",
     priority: "medium",
     labels: "",
+    assigneeId: "",
   });
 
   const fetchIssues = useCallback(async () => {
@@ -59,7 +75,17 @@ const IssueTracker = ({ projectId }) => {
 
   useEffect(() => {
     fetchIssues();
-  }, [fetchIssues]);
+  }, [fetchIssues, refreshKey]);
+
+  useEffect(() => {
+    const loadMembers = async () => {
+      try {
+        const res = await getProjectMembers(projectId);
+        setMembers(res.data || []);
+      } catch (err) { /* ignore */ }
+    };
+    loadMembers();
+  }, [projectId]);
 
   const handleCreate = async () => {
     if (!form.title.trim()) return;
@@ -71,12 +97,14 @@ const IssueTracker = ({ projectId }) => {
             .map((l) => l.trim())
             .filter(Boolean)
         : [];
-      await createIssue(projectId, { ...form, labels });
+      await createIssue(projectId, { ...form, labels, assigneeId: form.assigneeId || undefined });
       setShowCreate(false);
-      setForm({ title: "", description: "", priority: "medium", labels: "" });
+      setForm({ title: "", description: "", priority: "medium", labels: "", assigneeId: "" });
+      showFeedback("success", "Issue created!");
       fetchIssues();
     } catch (err) {
       console.error("Create issue failed:", err);
+      showFeedback("error", err?.response?.data?.error || "Failed to create issue");
     } finally {
       setCreating(false);
     }
@@ -86,18 +114,42 @@ const IssueTracker = ({ projectId }) => {
     const newStatus = issue.status === "open" ? "closed" : "open";
     try {
       await updateIssue(issue.issue_id, { status: newStatus });
+      showFeedback("success", `Issue ${newStatus === "closed" ? "closed" : "reopened"}!`);
       fetchIssues();
     } catch (err) {
       console.error("Status toggle failed:", err);
+      showFeedback("error", err?.response?.data?.error || "Failed to update issue");
     }
   };
 
   const viewIssue = async (issue) => {
     try {
-      const res = await getIssueDetail(issue.issue_id);
-      setSelectedIssue(res.data);
+      const [issueRes, commentsRes] = await Promise.all([
+        getIssueDetail(issue.issue_id),
+        getIssueComments(issue.issue_id),
+      ]);
+      setSelectedIssue(issueRes.data);
+      setComments(commentsRes.data || []);
+      setCommentText("");
     } catch (err) {
       console.error("Failed to load issue:", err);
+    }
+  };
+
+  const handleAddComment = async () => {
+    if (!commentText.trim() || !selectedIssue) return;
+    setCommenting(true);
+    try {
+      await addIssueComment(selectedIssue.issue_id, commentText.trim());
+      setCommentText("");
+      const res = await getIssueComments(selectedIssue.issue_id);
+      setComments(res.data || []);
+      showFeedback("success", "Comment added!");
+    } catch (err) {
+      console.error("Comment failed:", err);
+      showFeedback("error", "Failed to add comment");
+    } finally {
+      setCommenting(false);
     }
   };
 
@@ -118,7 +170,7 @@ const IssueTracker = ({ projectId }) => {
     return (
       <div className="space-y-4">
         <button
-          onClick={() => setSelectedIssue(null)}
+          onClick={() => { setSelectedIssue(null); setComments([]); }}
           className="text-sm text-blue-600 hover:underline"
         >
           &larr; Back to issues
@@ -163,10 +215,15 @@ const IssueTracker = ({ projectId }) => {
               {selectedIssue.description}
             </p>
           )}
-          <div className="flex items-center gap-4 text-xs text-gray-500">
-            {selectedIssue.author_name && (
+          <div className="flex items-center gap-4 text-xs text-gray-500 flex-wrap">
+            {(selectedIssue.reporter_name || selectedIssue.author_name) && (
               <span className="flex items-center gap-1">
-                <User size={10} /> {selectedIssue.author_name}
+                <User size={10} /> Opened by {selectedIssue.reporter_name || selectedIssue.author_name}
+              </span>
+            )}
+            {selectedIssue.assignee_name && (
+              <span className="flex items-center gap-1 bg-blue-50 text-blue-700 px-2 py-0.5 rounded-full">
+                <User size={10} /> Assigned to {selectedIssue.assignee_name}
               </span>
             )}
             <span className="flex items-center gap-1">
@@ -186,6 +243,53 @@ const IssueTracker = ({ projectId }) => {
               ))}
             </div>
           )}
+
+          {/* Comments Section */}
+          <div className="border-t pt-4 space-y-3">
+            <h4 className="text-sm font-medium text-gray-700 flex items-center gap-1">
+              <MessageSquare size={14} /> Comments ({comments.length})
+            </h4>
+            {comments.length > 0 ? (
+              <div className="space-y-2">
+                {comments.map((c) => (
+                  <div key={c.comment_id} className="bg-gray-50 rounded-lg p-3">
+                    <div className="flex items-center gap-2 mb-1 text-xs text-gray-500">
+                      <User size={10} />
+                      <span>{c.author_name || "Unknown"}</span>
+                      <span>&middot;</span>
+                      <span>{timeAgo(c.created_at)}</span>
+                    </div>
+                    <p className="text-sm text-gray-800 whitespace-pre-wrap">{c.body}</p>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="text-xs text-gray-400">No comments yet.</p>
+            )}
+
+            {/* Add Comment */}
+            <div className="flex gap-2">
+              <input
+                value={commentText}
+                onChange={(e) => setCommentText(e.target.value)}
+                placeholder="Write a comment..."
+                className="flex-1 border rounded-lg px-3 py-1.5 text-sm focus:ring-2 focus:ring-blue-500"
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && !e.shiftKey) {
+                    e.preventDefault();
+                    handleAddComment();
+                  }
+                }}
+              />
+              <button
+                onClick={handleAddComment}
+                disabled={commenting || !commentText.trim()}
+                className="px-3 py-1.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
+              >
+                <Send size={14} />
+              </button>
+            </div>
+          </div>
         </div>
       </div>
     );
@@ -193,6 +297,19 @@ const IssueTracker = ({ projectId }) => {
 
   return (
     <div className="space-y-4">
+      {/* Feedback */}
+      {feedback && (
+        <div
+          className={`px-4 py-2 rounded-lg text-sm ${
+            feedback.type === "success"
+              ? "bg-green-50 text-green-700 border border-green-200"
+              : "bg-red-50 text-red-700 border border-red-200"
+          }`}
+        >
+          {feedback.msg}
+        </div>
+      )}
+
       {/* Header */}
       <div className="flex items-center justify-between flex-wrap gap-2">
         <div className="flex items-center gap-2">
@@ -261,7 +378,7 @@ const IssueTracker = ({ projectId }) => {
               className="w-full border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-green-500 resize-none"
             />
           </div>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             <div>
               <label className="block text-xs font-medium text-gray-700 mb-1">
                 Priority
@@ -275,6 +392,23 @@ const IssueTracker = ({ projectId }) => {
                 <option value="medium">Medium</option>
                 <option value="high">High</option>
                 <option value="critical">Critical</option>
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-700 mb-1">
+                Assignee
+              </label>
+              <select
+                value={form.assigneeId}
+                onChange={(e) => setForm({ ...form, assigneeId: e.target.value })}
+                className="w-full border rounded-lg px-3 py-1.5 text-sm focus:ring-2 focus:ring-green-500"
+              >
+                <option value="">Unassigned</option>
+                {members.map((m) => (
+                  <option key={m.person_id} value={m.person_id}>
+                    {m.display_name}
+                  </option>
+                ))}
               </select>
             </div>
             <div>
@@ -371,6 +505,11 @@ const IssueTracker = ({ projectId }) => {
                     <span className="text-xs text-gray-400">
                       {timeAgo(issue.created_at)}
                     </span>
+                    {issue.assignee_name && (
+                      <span className="text-xs text-gray-500 flex items-center gap-0.5">
+                        <User size={10} /> {issue.assignee_name}
+                      </span>
+                    )}
                   </div>
                 </div>
               </div>

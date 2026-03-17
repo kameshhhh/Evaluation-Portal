@@ -29,7 +29,7 @@ const MONTHS = [
   "Dec",
 ];
 
-const ContributionGraph = ({ projectId }) => {
+const ContributionGraph = ({ projectId, refreshKey }) => {
   const [graph, setGraph] = useState([]);
   const [summary, setSummary] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -42,8 +42,28 @@ const ContributionGraph = ({ projectId }) => {
           getContributionGraph(projectId),
           getActivitySummary(projectId),
         ]);
-        setGraph(graphRes.data || []);
-        setSummary(summaryRes.data);
+        // Map DB column names to component expectations
+        const graphData = (graphRes.data || []).map((d) => ({
+          date: d.activity_date,
+          count: parseInt(d.activity_count) || 0,
+        }));
+        setGraph(graphData);
+        // Transform activity_type array into keyed summary object
+        const raw = summaryRes.data || [];
+        const summaryObj = {
+          commits: 0,
+          issues: 0,
+          pull_requests: 0,
+          branches: 0,
+        };
+        raw.forEach((r) => {
+          const c = parseInt(r.count) || 0;
+          if (r.activity_type === "commit") summaryObj.commits += c;
+          else if (r.activity_type?.startsWith("issue")) summaryObj.issues += c;
+          else if (r.activity_type?.startsWith("pr")) summaryObj.pull_requests += c;
+          else if (r.activity_type?.startsWith("branch")) summaryObj.branches += c;
+        });
+        setSummary(summaryObj);
       } catch (err) {
         console.error("Failed to load contribution data:", err);
       } finally {
@@ -51,7 +71,7 @@ const ContributionGraph = ({ projectId }) => {
       }
     };
     load();
-  }, [projectId]);
+  }, [projectId, refreshKey]);
 
   const getIntensity = (count) => {
     if (!count || count === 0) return "bg-gray-100";

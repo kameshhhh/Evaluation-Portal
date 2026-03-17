@@ -18,12 +18,18 @@ import {
   Loader2,
   Send,
   GitBranch,
+  CheckCircle2,
+  AlertCircle,
+  MessageCircle,
+  Eye,
 } from "lucide-react";
 import {
   getPullRequests,
   createPullRequest,
   updatePullRequest,
   addPrComment,
+  submitPrReview,
+  getPrReviews,
   getBranches,
 } from "../../../services/gitRepoApi";
 
@@ -33,7 +39,7 @@ const PR_STATUS_CONFIG = {
   closed: { color: "bg-red-100 text-red-700", icon: XCircle },
 };
 
-const PullRequestPanel = ({ projectId }) => {
+const PullRequestPanel = ({ projectId, refreshKey }) => {
   const [prs, setPrs] = useState([]);
   const [branches, setBranches] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -43,12 +49,22 @@ const PullRequestPanel = ({ projectId }) => {
   const [creating, setCreating] = useState(false);
   const [commentText, setCommentText] = useState("");
   const [commenting, setCommenting] = useState(false);
+  const [feedback, setFeedback] = useState(null);
+  const [reviews, setReviews] = useState([]);
+  const [showReviewForm, setShowReviewForm] = useState(false);
+  const [reviewForm, setReviewForm] = useState({ status: "approved", body: "" });
+  const [submittingReview, setSubmittingReview] = useState(false);
+
+  const showFeedback = (type, msg) => {
+    setFeedback({ type, msg });
+    setTimeout(() => setFeedback(null), 4000);
+  };
 
   const [form, setForm] = useState({
     title: "",
     description: "",
-    source_branch: "",
-    target_branch: "main",
+    sourceBranch: "",
+    targetBranch: "main",
   });
 
   const fetchPrs = useCallback(async () => {
@@ -75,10 +91,10 @@ const PullRequestPanel = ({ projectId }) => {
   useEffect(() => {
     fetchPrs();
     fetchBranches();
-  }, [fetchPrs, fetchBranches]);
+  }, [fetchPrs, fetchBranches, refreshKey]);
 
   const handleCreate = async () => {
-    if (!form.title.trim() || !form.source_branch) return;
+    if (!form.title.trim() || !form.sourceBranch) return;
     setCreating(true);
     try {
       await createPullRequest(projectId, form);
@@ -86,12 +102,14 @@ const PullRequestPanel = ({ projectId }) => {
       setForm({
         title: "",
         description: "",
-        source_branch: "",
-        target_branch: "main",
+        sourceBranch: "",
+        targetBranch: "main",
       });
+      showFeedback("success", "Pull request created!");
       fetchPrs();
     } catch (err) {
       console.error("Create PR failed:", err);
+      showFeedback("error", err?.response?.data?.error || "Failed to create PR");
     } finally {
       setCreating(false);
     }
@@ -100,10 +118,12 @@ const PullRequestPanel = ({ projectId }) => {
   const handleStatusChange = async (prId, newStatus) => {
     try {
       await updatePullRequest(prId, { status: newStatus });
+      showFeedback("success", `PR ${newStatus === "merged" ? "merged" : "closed"} successfully!`);
       fetchPrs();
       setSelectedPr(null);
     } catch (err) {
       console.error("Status update failed:", err);
+      showFeedback("error", err?.response?.data?.error || "Failed to update PR");
     }
   };
 
@@ -113,6 +133,7 @@ const PullRequestPanel = ({ projectId }) => {
     try {
       await addPrComment(selectedPr.pr_id, commentText.trim());
       setCommentText("");
+      showFeedback("success", "Comment added!");
       // Refresh the selected PR
       const res = await getPullRequests(projectId, { status: statusFilter });
       const updated = (res.data || []).find(
@@ -123,6 +144,36 @@ const PullRequestPanel = ({ projectId }) => {
       console.error("Comment failed:", err);
     } finally {
       setCommenting(false);
+    }
+  };
+
+  const selectPr = async (pr) => {
+    setSelectedPr(pr);
+    setShowReviewForm(false);
+    setReviewForm({ status: "approved", body: "" });
+    try {
+      const res = await getPrReviews(pr.pr_id);
+      setReviews(res.data || []);
+    } catch (err) {
+      setReviews([]);
+    }
+  };
+
+  const handleSubmitReview = async () => {
+    if (!selectedPr) return;
+    setSubmittingReview(true);
+    try {
+      await submitPrReview(selectedPr.pr_id, reviewForm);
+      setShowReviewForm(false);
+      setReviewForm({ status: "approved", body: "" });
+      showFeedback("success", "Review submitted!");
+      const res = await getPrReviews(selectedPr.pr_id);
+      setReviews(res.data || []);
+    } catch (err) {
+      console.error("Review failed:", err);
+      showFeedback("error", err?.response?.data?.error || "Failed to submit review");
+    } finally {
+      setSubmittingReview(false);
     }
   };
 
@@ -167,6 +218,14 @@ const PullRequestPanel = ({ projectId }) => {
             </div>
             {selectedPr.status === "open" && (
               <div className="flex gap-2">
+                <button
+                  onClick={() => setShowReviewForm(!showReviewForm)}
+                  className="px-3 py-1.5 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+                >
+                  <span className="flex items-center gap-1">
+                    <Eye size={14} /> Review
+                  </span>
+                </button>
                 <button
                   onClick={() => handleStatusChange(selectedPr.pr_id, "merged")}
                   className="px-3 py-1.5 text-sm bg-purple-600 text-white rounded-lg hover:bg-purple-700"
@@ -214,6 +273,88 @@ const PullRequestPanel = ({ projectId }) => {
             </span>
           </div>
 
+          {/* Review Form */}
+          {showReviewForm && (
+            <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 space-y-3">
+              <h4 className="text-sm font-semibold text-gray-700">Submit Review</h4>
+              <div className="flex items-center gap-3">
+                {[
+                  { value: "approved", label: "Approve", icon: CheckCircle2, color: "text-green-600" },
+                  { value: "changes_requested", label: "Request Changes", icon: AlertCircle, color: "text-orange-600" },
+                  { value: "commented", label: "Comment", icon: MessageCircle, color: "text-gray-600" },
+                ].map((opt) => {
+                  const Icon = opt.icon;
+                  return (
+                    <button
+                      key={opt.value}
+                      onClick={() => setReviewForm({ ...reviewForm, status: opt.value })}
+                      className={`flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-lg border transition-colors ${
+                        reviewForm.status === opt.value
+                          ? "bg-white border-blue-500 shadow-sm"
+                          : "bg-white border-gray-200 opacity-60 hover:opacity-100"
+                      }`}
+                    >
+                      <Icon size={14} className={opt.color} />
+                      {opt.label}
+                    </button>
+                  );
+                })}
+              </div>
+              <textarea
+                value={reviewForm.body}
+                onChange={(e) => setReviewForm({ ...reviewForm, body: e.target.value })}
+                rows={3}
+                placeholder="Leave a review comment (optional)..."
+                className="w-full border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 resize-none"
+              />
+              <div className="flex gap-2">
+                <button
+                  onClick={handleSubmitReview}
+                  disabled={submittingReview}
+                  className="px-4 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700 disabled:opacity-50"
+                >
+                  {submittingReview ? "Submitting..." : "Submit Review"}
+                </button>
+                <button
+                  onClick={() => setShowReviewForm(false)}
+                  className="px-4 py-2 bg-white text-gray-700 text-sm rounded-lg border hover:bg-gray-50"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Reviews */}
+          {reviews.length > 0 && (
+            <div className="border-t pt-4 space-y-2">
+              <h4 className="text-sm font-medium text-gray-700 flex items-center gap-1">
+                <Eye size={14} /> Reviews ({reviews.length})
+              </h4>
+              {reviews.map((r) => {
+                const statusConfig = {
+                  approved: { icon: CheckCircle2, color: "text-green-600", bg: "bg-green-50 border-green-200", label: "Approved" },
+                  changes_requested: { icon: AlertCircle, color: "text-orange-600", bg: "bg-orange-50 border-orange-200", label: "Changes Requested" },
+                  commented: { icon: MessageCircle, color: "text-gray-600", bg: "bg-gray-50 border-gray-200", label: "Commented" },
+                  pending: { icon: Clock, color: "text-yellow-600", bg: "bg-yellow-50 border-yellow-200", label: "Pending" },
+                };
+                const cfg = statusConfig[r.status] || statusConfig.pending;
+                const RIcon = cfg.icon;
+                return (
+                  <div key={r.review_id} className={`rounded-lg p-3 border ${cfg.bg}`}>
+                    <div className="flex items-center gap-2 mb-1">
+                      <RIcon size={14} className={cfg.color} />
+                      <span className="text-sm font-medium text-gray-800">{r.reviewer_name}</span>
+                      <span className={`text-xs font-medium ${cfg.color}`}>{cfg.label}</span>
+                      <span className="text-xs text-gray-400">&middot; {timeAgo(r.created_at)}</span>
+                    </div>
+                    {r.body && <p className="text-sm text-gray-700 ml-5">{r.body}</p>}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
           {/* Comments */}
           <div className="border-t pt-4 space-y-3">
             <h4 className="text-sm font-medium text-gray-700 flex items-center gap-1">
@@ -222,14 +363,14 @@ const PullRequestPanel = ({ projectId }) => {
             {selectedPr.comments && selectedPr.comments.length > 0 ? (
               <div className="space-y-2">
                 {selectedPr.comments.map((c, i) => (
-                  <div key={i} className="bg-gray-50 rounded-lg p-3">
+                  <div key={c.id || i} className="bg-gray-50 rounded-lg p-3">
                     <div className="flex items-center gap-2 mb-1 text-xs text-gray-500">
                       <User size={10} />
-                      <span>{c.author_name || "Unknown"}</span>
+                      <span>{c.authorName || c.author_name || "Unknown"}</span>
                       <span>&middot;</span>
-                      <span>{timeAgo(c.created_at)}</span>
+                      <span>{timeAgo(c.createdAt || c.created_at)}</span>
                     </div>
-                    <p className="text-sm text-gray-800">{c.comment}</p>
+                    <p className="text-sm text-gray-800">{c.body || c.comment}</p>
                   </div>
                 ))}
               </div>
@@ -267,6 +408,19 @@ const PullRequestPanel = ({ projectId }) => {
 
   return (
     <div className="space-y-4">
+      {/* Feedback */}
+      {feedback && (
+        <div
+          className={`px-4 py-2 rounded-lg text-sm ${
+            feedback.type === "success"
+              ? "bg-green-50 text-green-700 border border-green-200"
+              : "bg-red-50 text-red-700 border border-red-200"
+          }`}
+        >
+          {feedback.msg}
+        </div>
+      )}
+
       {/* Header */}
       <div className="flex items-center justify-between flex-wrap gap-2">
         <div className="flex items-center gap-2">
@@ -325,15 +479,15 @@ const PullRequestPanel = ({ projectId }) => {
                 Source Branch
               </label>
               <select
-                value={form.source_branch}
+                value={form.sourceBranch}
                 onChange={(e) =>
-                  setForm({ ...form, source_branch: e.target.value })
+                  setForm({ ...form, sourceBranch: e.target.value })
                 }
                 className="w-full border rounded-lg px-3 py-1.5 text-sm focus:ring-2 focus:ring-green-500"
               >
                 <option value="">Select branch...</option>
                 {branches
-                  .filter((b) => b.branch_name !== form.target_branch)
+                  .filter((b) => b.branch_name !== form.targetBranch)
                   .map((b) => (
                     <option key={b.branch_name} value={b.branch_name}>
                       {b.branch_name}
@@ -346,9 +500,9 @@ const PullRequestPanel = ({ projectId }) => {
                 Target Branch
               </label>
               <select
-                value={form.target_branch}
+                value={form.targetBranch}
                 onChange={(e) =>
-                  setForm({ ...form, target_branch: e.target.value })
+                  setForm({ ...form, targetBranch: e.target.value })
                 }
                 className="w-full border rounded-lg px-3 py-1.5 text-sm focus:ring-2 focus:ring-green-500"
               >
@@ -378,7 +532,7 @@ const PullRequestPanel = ({ projectId }) => {
           <div className="flex gap-2">
             <button
               onClick={handleCreate}
-              disabled={creating || !form.title.trim() || !form.source_branch}
+              disabled={creating || !form.title.trim() || !form.sourceBranch}
               className="px-4 py-2 bg-green-600 text-white text-sm rounded-lg hover:bg-green-700 disabled:opacity-50"
             >
               {creating ? "Creating..." : "Create PR"}
@@ -412,7 +566,7 @@ const PullRequestPanel = ({ projectId }) => {
             return (
               <button
                 key={pr.pr_id}
-                onClick={() => setSelectedPr(pr)}
+                onClick={() => selectPr(pr)}
                 className="w-full flex items-start gap-3 px-4 py-3 hover:bg-gray-50 text-left"
               >
                 <Icon

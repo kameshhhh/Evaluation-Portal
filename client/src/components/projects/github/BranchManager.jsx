@@ -20,13 +20,19 @@ import {
   deleteBranch,
 } from "../../../services/gitRepoApi";
 
-const BranchManager = ({ projectId }) => {
+const BranchManager = ({ projectId, refreshKey }) => {
   const [branches, setBranches] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showCreate, setShowCreate] = useState(false);
   const [newName, setNewName] = useState("");
   const [sourceBranch, setSourceBranch] = useState("main");
   const [creating, setCreating] = useState(false);
+  const [feedback, setFeedback] = useState(null);
+
+  const showFeedback = (type, msg) => {
+    setFeedback({ type, msg });
+    setTimeout(() => setFeedback(null), 4000);
+  };
 
   const fetchBranches = useCallback(async () => {
     try {
@@ -41,21 +47,23 @@ const BranchManager = ({ projectId }) => {
 
   useEffect(() => {
     fetchBranches();
-  }, [fetchBranches]);
+  }, [fetchBranches, refreshKey]);
 
   const handleCreate = async () => {
     if (!newName.trim()) return;
     setCreating(true);
     try {
       await createBranch(projectId, {
-        branch_name: newName.trim(),
-        source_branch: sourceBranch,
+        branchName: newName.trim(),
+        fromBranch: sourceBranch,
       });
       setNewName("");
       setShowCreate(false);
+      showFeedback("success", `Branch "${newName.trim()}" created!`);
       fetchBranches();
     } catch (err) {
       console.error("Create branch failed:", err);
+      showFeedback("error", err?.response?.data?.error || "Failed to create branch");
     } finally {
       setCreating(false);
     }
@@ -66,9 +74,11 @@ const BranchManager = ({ projectId }) => {
     if (!window.confirm(`Delete branch "${branchName}"?`)) return;
     try {
       await deleteBranch(projectId, branchName);
+      showFeedback("success", `Branch "${branchName}" deleted!`);
       fetchBranches();
     } catch (err) {
       console.error("Delete branch failed:", err);
+      showFeedback("error", err?.response?.data?.error || "Failed to delete branch");
     }
   };
 
@@ -83,6 +93,19 @@ const BranchManager = ({ projectId }) => {
 
   return (
     <div className="space-y-4">
+      {/* Feedback */}
+      {feedback && (
+        <div
+          className={`px-4 py-2 rounded-lg text-sm ${
+            feedback.type === "success"
+              ? "bg-green-50 text-green-700 border border-green-200"
+              : "bg-red-50 text-red-700 border border-red-200"
+          }`}
+        >
+          {feedback.msg}
+        </div>
+      )}
+
       {/* Header */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
