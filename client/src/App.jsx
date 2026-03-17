@@ -45,6 +45,8 @@ import TeamFormationPage from "./components/Dashboard/student/TeamFormationPage"
 import SessionPlannerPage from "./components/Dashboard/SessionPlannerPage";
 import SessionPlannerListPage from "./components/Dashboard/SessionPlannerListPage";
 import SessionDetailPage from "./components/Dashboard/SessionDetailPage";
+import WorkLogPage from "./components/worklog/WorkLogPage";
+import GitHubProfilePage from "./components/github/GitHubProfilePage";
 import Navbar from "./components/Layout/Navbar";
 import BottomNavigation from "./components/Layout/BottomNavigation";
 import DebugDrawer from "./components/Layout/DebugDrawer";
@@ -428,6 +430,26 @@ const App = () => {
                     element={
                       <ProtectedRoute>
                         <SessionPlannerPage />
+                      </ProtectedRoute>
+                    }
+                  />
+
+                  {/* Protected route — Work Log */}
+                  <Route
+                    path={ROUTES.WORKLOG}
+                    element={
+                      <ProtectedRoute>
+                        <WorkLogPage />
+                      </ProtectedRoute>
+                    }
+                  />
+
+                  {/* Protected route — GitHub Profile (admin views student) */}
+                  <Route
+                    path={ROUTES.GITHUB_PROFILE}
+                    element={
+                      <ProtectedRoute>
+                        <GitHubProfilePage />
                       </ProtectedRoute>
                     }
                   />

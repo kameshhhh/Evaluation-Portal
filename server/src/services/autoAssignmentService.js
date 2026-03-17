@@ -241,15 +241,15 @@ class AutoAssignmentService {
                 [sessionId, sessionTrack]
             );
 
-            // Merge and deduplicate
-            const seenIds = new Set();
-            const allStudents = [];
+            // Merge and deduplicate — prefer rows WITH team_formation_id over null
+            const studentMap = new Map();
             for (const row of [...studentRes.rows, ...memberRes.rows]) {
-                if (!seenIds.has(row.person_id)) {
-                    seenIds.add(row.person_id);
-                    allStudents.push(row);
+                const existing = studentMap.get(row.person_id);
+                if (!existing || (!existing.team_formation_id && row.team_formation_id)) {
+                    studentMap.set(row.person_id, row);
                 }
             }
+            const allStudents = Array.from(studentMap.values());
 
             if (allStudents.length === 0) return { success: true, count: 0, teams: 0, track: sessionTrack };
 

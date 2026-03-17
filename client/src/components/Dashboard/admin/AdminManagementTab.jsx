@@ -1,9 +1,10 @@
 // ============================================================
-// ADMIN MANAGEMENT TAB — Session Delete & Credibility Reset
+// ADMIN MANAGEMENT TAB — Session Delete, Credibility Reset & CR Rounds
 // ============================================================
-// Two panels:
+// Three panels:
 //   1. Session Management — View sessions, delete with confirmation
 //   2. Credibility Reset  — Select faculty or reset all
+//   3. CR Rounds          — View and delete comparative review rounds
 // Both work in real-time: backend deletes → socket broadcast → UI updates
 // ============================================================
 
@@ -23,6 +24,7 @@ import {
   Calendar,
   Hash,
   Zap,
+  Scale,
 } from "lucide-react";
 import {
   listAllSessions,
@@ -30,6 +32,7 @@ import {
   listFacultyCredibility,
   resetCredibility,
 } from "../../../services/adminManagementApi";
+import { listRounds, deleteRound } from "../../../services/comparativeReviewApi";
 
 // ============================================================
 // STATUS BADGE — Color-coded session status
@@ -128,10 +131,17 @@ const AdminManagementTab = () => {
   const [resetTarget, setResetTarget] = useState(null); // "selected" | "all" | null
   const [resetLoading, setResetLoading] = useState(false);
 
+  // ── CR Rounds State ──
+  const [crRounds, setCrRounds] = useState([]);
+  const [crLoading, setCrLoading] = useState(false);
+  const [crSearch, setCrSearch] = useState("");
+  const [crDeleteTarget, setCrDeleteTarget] = useState(null);
+  const [crDeleteLoading, setCrDeleteLoading] = useState(false);
+
   // ── Shared State ──
   const [successMsg, setSuccessMsg] = useState(null);
   const [error, setError] = useState(null);
-  const [activePanel, setActivePanel] = useState("sessions"); // "sessions" | "credibility"
+  const [activePanel, setActivePanel] = useState("sessions"); // "sessions" | "credibility" | "cr"
 
   // ── Auto-dismiss success messages ──
   useEffect(() => {
@@ -169,11 +179,27 @@ const AdminManagementTab = () => {
     }
   }, []);
 
+  // ── Load CR Rounds ──
+  const loadCRRounds = useCallback(async () => {
+    setCrLoading(true);
+    setError(null);
+    try {
+      const result = await listRounds();
+      const data = result?.data || result || [];
+      setCrRounds(Array.isArray(data) ? data : []);
+    } catch (err) {
+      setError(err.response?.data?.error || err.message || "Failed to load CR rounds");
+    } finally {
+      setCrLoading(false);
+    }
+  }, []);
+
   // ── Initial Load ──
   useEffect(() => {
     loadSessions();
     loadFaculty();
-  }, [loadSessions, loadFaculty]);
+    loadCRRounds();
+  }, [loadSessions, loadFaculty, loadCRRounds]);
 
   // ── Delete Session Handler ──
   const handleDeleteSession = async () => {
@@ -191,6 +217,24 @@ const AdminManagementTab = () => {
       setDeleteTarget(null);
     } finally {
       setDeleteLoading(false);
+    }
+  };
+
+  // ── Delete CR Round Handler ──
+  const handleDeleteCRRound = async () => {
+    if (!crDeleteTarget) return;
+    setCrDeleteLoading(true);
+    setError(null);
+    try {
+      await deleteRound(crDeleteTarget.id);
+      setSuccessMsg(`CR Round "${crDeleteTarget.title}" deleted.`);
+      setCrDeleteTarget(null);
+      setCrRounds((prev) => prev.filter((r) => r.id !== crDeleteTarget.id));
+    } catch (err) {
+      setError(err.response?.data?.error || err.message || "Delete failed");
+      setCrDeleteTarget(null);
+    } finally {
+      setCrDeleteLoading(false);
     }
   };
 
@@ -234,6 +278,16 @@ const AdminManagementTab = () => {
       f.display_name?.toLowerCase().includes(q) ||
       f.email?.toLowerCase().includes(q) ||
       f.department_code?.toLowerCase().includes(q)
+    );
+  });
+
+  const filteredCR = crRounds.filter((r) => {
+    if (!crSearch) return true;
+    const q = crSearch.toLowerCase();
+    return (
+      r.title?.toLowerCase().includes(q) ||
+      r.track?.toLowerCase().includes(q) ||
+      r.status?.toLowerCase().includes(q)
     );
   });
 
@@ -297,6 +351,17 @@ const AdminManagementTab = () => {
         >
           <Shield className="h-4 w-4" />
           Reset Credibility ({faculty.length})
+        </button>
+        <button
+          onClick={() => setActivePanel("cr")}
+          className={`flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg text-sm font-semibold transition-all ${
+            activePanel === "cr"
+              ? "bg-violet-50 text-violet-700 shadow-sm border border-violet-200/50"
+              : "text-gray-500 hover:text-gray-700 hover:bg-gray-50"
+          }`}
+        >
+          <Scale className="h-4 w-4" />
+          CR Rounds ({crRounds.length})
         </button>
       </div>
 
@@ -601,7 +666,141 @@ const AdminManagementTab = () => {
       )}
 
       {/* ════════════════════════════════════════════════════════ */}
-      {/* CONFIRMATION MODALS                                     */}
+      {/* PANEL 3: CR ROUND MANAGEMENT                           */}
+      {/* ════════════════════════════════════════════════════════ */}
+      {activePanel === "cr" && (
+        <div className="bg-white rounded-2xl shadow-sm border border-gray-200/50 overflow-hidden">
+          {/* Header */}
+          <div className="px-5 py-4 border-b border-gray-100 flex items-center justify-between">
+            <div>
+              <h3 className="text-base font-bold text-gray-900 flex items-center gap-2">
+                <Scale className="h-4.5 w-4.5 text-violet-500" />
+                CR Round Management
+              </h3>
+              <p className="text-xs text-gray-500 mt-0.5">
+                Delete comparative review rounds and all their pairings & marks
+              </p>
+            </div>
+            <div className="flex items-center gap-2">
+              <div className="relative">
+                <Search className="absolute left-2.5 top-2 h-3.5 w-3.5 text-gray-400" />
+                <input
+                  type="text"
+                  placeholder="Search CR rounds..."
+                  value={crSearch}
+                  onChange={(e) => setCrSearch(e.target.value)}
+                  className="pl-8 pr-3 py-1.5 text-xs border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-violet-500 w-52"
+                />
+              </div>
+              <button
+                onClick={loadCRRounds}
+                disabled={crLoading}
+                className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition"
+                title="Refresh"
+              >
+                <RefreshCw className={`h-4 w-4 ${crLoading ? "animate-spin" : ""}`} />
+              </button>
+            </div>
+          </div>
+
+          {/* CR Table */}
+          <div className="overflow-x-auto max-h-[500px] overflow-y-auto">
+            {crLoading ? (
+              <div className="flex items-center justify-center py-16">
+                <Loader2 className="h-6 w-6 animate-spin text-gray-400" />
+                <span className="ml-2 text-sm text-gray-500">Loading CR rounds...</span>
+              </div>
+            ) : filteredCR.length === 0 ? (
+              <div className="text-center py-16 text-gray-400 text-sm">
+                {crSearch ? "No CR rounds match your search" : "No CR rounds found"}
+              </div>
+            ) : (
+              <table className="w-full text-xs">
+                <thead className="bg-gray-50 border-b border-gray-200 sticky top-0 z-10">
+                  <tr>
+                    <th className="text-left px-4 py-2.5 font-semibold text-gray-600">Round</th>
+                    <th className="text-left px-3 py-2.5 font-semibold text-gray-600">Track</th>
+                    <th className="text-center px-3 py-2.5 font-semibold text-gray-600">Status</th>
+                    <th className="text-center px-3 py-2.5 font-semibold text-gray-600">Pairings</th>
+                    <th className="text-center px-3 py-2.5 font-semibold text-gray-600">Pool</th>
+                    <th className="text-left px-3 py-2.5 font-semibold text-gray-600">Batch</th>
+                    <th className="text-left px-3 py-2.5 font-semibold text-gray-600">Date</th>
+                    <th className="text-center px-3 py-2.5 font-semibold text-gray-600">Action</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100">
+                  {filteredCR.map((r) => (
+                    <tr key={r.id} className="hover:bg-red-50/30 transition-colors group">
+                      <td className="px-4 py-3">
+                        <div className="font-medium text-gray-900 truncate max-w-[220px]" title={r.title}>
+                          {r.title || "Untitled"}
+                        </div>
+                        {r.description && (
+                          <div className="text-[10px] text-gray-400 mt-0.5 truncate max-w-[220px]">
+                            {r.description}
+                          </div>
+                        )}
+                      </td>
+                      <td className="px-3 py-3">
+                        <span className="text-gray-600 capitalize">{r.track?.replace("_", " & ") || "—"}</span>
+                      </td>
+                      <td className="px-3 py-3 text-center">
+                        <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold border ${
+                          r.status === "finalized" ? "bg-green-100 text-green-700 border-green-200" :
+                          r.status === "marking" ? "bg-amber-100 text-amber-700 border-amber-200" :
+                          r.status === "active" ? "bg-blue-100 text-blue-700 border-blue-200" :
+                          "bg-gray-100 text-gray-600 border-gray-200"
+                        }`}>
+                          {r.status?.toUpperCase() || "DRAFT"}
+                        </span>
+                      </td>
+                      <td className="px-3 py-3 text-center">
+                        <span className="font-mono font-semibold text-gray-700">
+                          {r.pairing_count || 0}
+                        </span>
+                      </td>
+                      <td className="px-3 py-3 text-center">
+                        <span className="font-mono font-semibold text-gray-700">
+                          {parseFloat(r.mark_pool || 5).toFixed(1)}
+                        </span>
+                      </td>
+                      <td className="px-3 py-3 text-gray-500">
+                        {r.batch_year || "—"}
+                      </td>
+                      <td className="px-3 py-3 text-gray-500">
+                        {r.created_at ? new Date(r.created_at).toLocaleDateString() : "—"}
+                      </td>
+                      <td className="px-3 py-3 text-center">
+                        <button
+                          onClick={() => setCrDeleteTarget(r)}
+                          disabled={r.status === "finalized"}
+                          className="inline-flex items-center gap-1 px-2.5 py-1.5 text-[11px] font-bold text-red-600 bg-red-50 hover:bg-red-100 border border-red-200 rounded-lg transition-colors opacity-60 group-hover:opacity-100 disabled:opacity-30 disabled:cursor-not-allowed"
+                          title={r.status === "finalized" ? "Cannot delete finalized rounds" : `Delete "${r.title}"`}
+                        >
+                          <Trash2 className="h-3 w-3" />
+                          Delete
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
+
+          {/* Footer Stats */}
+          {!crLoading && filteredCR.length > 0 && (
+            <div className="px-5 py-2.5 border-t border-gray-100 bg-gray-50/50 text-[11px] text-gray-500">
+              Showing {filteredCR.length} of {crRounds.length} CR rounds
+              {" · "}
+              {crRounds.filter((r) => r.status === "finalized").length} finalized
+              {" · "}
+              {crRounds.filter((r) => r.status === "active" || r.status === "marking").length} active
+            </div>
+          )}
+        </div>
+      )}
+
       {/* ════════════════════════════════════════════════════════ */}
 
       {/* Delete Session Modal */}
@@ -634,6 +833,22 @@ const AdminManagementTab = () => {
         loading={resetLoading}
         onConfirm={handleResetCredibility}
         onCancel={() => setResetTarget(null)}
+      />
+
+      {/* Delete CR Round Modal */}
+      <ConfirmModal
+        open={!!crDeleteTarget}
+        danger
+        title="Delete CR Round Permanently"
+        message={
+          crDeleteTarget
+            ? `This will permanently delete "${crDeleteTarget.title || "Untitled"}" and ALL associated data:\n\n• All pairings and team assignments\n• All submitted marks and feedback\n• Rankings data for this round\n\nThis action CANNOT be undone.`
+            : ""
+        }
+        confirmLabel="Delete Forever"
+        loading={crDeleteLoading}
+        onConfirm={handleDeleteCRRound}
+        onCancel={() => setCrDeleteTarget(null)}
       />
     </div>
   );

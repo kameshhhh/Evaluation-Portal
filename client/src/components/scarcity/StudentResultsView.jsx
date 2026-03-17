@@ -10,7 +10,7 @@
 // Data: GET /api/scarcity/sessions/my-results
 // ============================================================
 
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import api from "../../services/api";
 import {
@@ -18,6 +18,7 @@ import {
   fileAppeal,
   getMyAppeals,
 } from "../../services/appealsApi";
+import { getMyEvaluator } from "../../services/sessionPlannerApi";
 import {
   ArrowLeft,
   Award,
@@ -30,12 +31,14 @@ import {
   RefreshCw,
   Target,
   Calendar,
-  Star,
-  ChevronRight,
+  ChevronDown,
+  ChevronUp,
   MessageSquare,
   CheckCircle,
   XCircle,
   Clock,
+  Users,
+  AlertTriangle,
 } from "lucide-react";
 
 // ============================================================
@@ -48,6 +51,8 @@ const StudentResultsView = () => {
   const [results, setResults] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [evaluatorRows, setEvaluatorRows] = useState([]);
+  const [expandedSessions, setExpandedSessions] = useState(new Set());
 
   // Appeal state
   const [myAppeals, setMyAppeals] = useState([]); // appeals already filed
@@ -64,26 +69,32 @@ const StudentResultsView = () => {
       setLoading(true);
       setError(null);
 
-      // Fetch the student's own results from all sessions
-      const response = await api.get("/scarcity/sessions/my-results");
+      // Fetch basic results + rich evaluator data in parallel
+      const [basicRes, evalRes] = await Promise.allSettled([
+        api.get("/scarcity/sessions/my-results"),
+        getMyEvaluator(),
+      ]);
 
-      if (response.data?.success) {
-        setResults(response.data.data || []);
+      // Process basic results
+      if (basicRes.status === "fulfilled" && basicRes.value.data?.success) {
+        setResults(basicRes.value.data.data || []);
+      } else if (basicRes.status === "rejected" && basicRes.reason?.response?.status === 404) {
+        setResults([]);
       } else {
         setResults([]);
-        setError("Server returned an unsuccessful response.");
+        setError("Failed to load your results.");
+      }
+
+      // Process evaluator data (non-critical — don't block on failure)
+      if (evalRes.status === "fulfilled" && evalRes.value?.data) {
+        setEvaluatorRows(evalRes.value.data);
       }
     } catch (err) {
-      // If 404 or no data, just show empty state
-      if (err.response?.status === 404) {
-        setResults([]);
-      } else {
-        setError(
-          err.response?.data?.message ||
-            err.message ||
-            "Failed to load your results.",
-        );
-      }
+      setError(
+        err.response?.data?.message ||
+          err.message ||
+          "Failed to load your results.",
+      );
     } finally {
       setLoading(false);
     }
@@ -180,6 +191,30 @@ const StudentResultsView = () => {
     if (pct <= 50) return { label: "Above Average", color: "text-blue-600" };
     if (pct <= 75) return { label: "Average", color: "text-gray-600" };
     return { label: "Needs Improvement", color: "text-amber-600" };
+  };
+
+  // ---------------------------------------------------------
+  // EVALUATOR DATA — Group by session for rich breakdowns
+  // ---------------------------------------------------------
+  const evaluatorBySession = useMemo(() => {
+    const map = {};
+    for (const row of evaluatorRows) {
+      const sid = row.session_id;
+      if (!map[sid]) map[sid] = { rows: [], title: row.session_title, rubricNameMap: row.rubric_name_map || {} };
+      map[sid].rows.push(row);
+      // Merge rubric name maps (they're the same across rows in same session)
+      if (row.rubric_name_map) Object.assign(map[sid].rubricNameMap, row.rubric_name_map);
+    }
+    return map;
+  }, [evaluatorRows]);
+
+  const toggleSession = (sessionId) => {
+    setExpandedSessions((prev) => {
+      const next = new Set(prev);
+      if (next.has(sessionId)) next.delete(sessionId);
+      else next.add(sessionId);
+      return next;
+    });
   };
 
   return (
@@ -299,167 +334,346 @@ const StudentResultsView = () => {
                 result.rank,
                 result.totalTargets,
               );
+              const evalData = evaluatorBySession[result.sessionId];
+              const sessionTitle = evalData?.title;
+              const isExpanded = expandedSessions.has(result.sessionId);
+              // Get weighted score from evaluator data
+              const weightedScore = evalData?.rows?.[0]?.display_score ?? evalData?.rows?.[0]?.normalized_score;
+              const confidence = evalData?.rows?.[0]?.confidence_score;
+              const scaleMax = evalData?.rows?.[0]?.scale_max || 100;
+
               return (
                 <div
                   key={result.sessionId || index}
-                  className="bg-white rounded-2xl shadow-lg border border-gray-200/50 p-5 hover:border-indigo-200 transition-colors"
+                  className="bg-white rounded-2xl shadow-lg border border-gray-200/50 overflow-hidden hover:border-indigo-200 transition-colors"
                 >
-                  {/* Card header */}
-                  <div className="flex items-start justify-between mb-4">
-                    <div>
-                      <h3 className="font-semibold text-gray-900 text-sm flex items-center gap-2">
-                        <Target className="h-4 w-4 text-indigo-500" />
-                        {result.sessionType?.replace("_", " ") ||
-                          "Evaluation Session"}
-                        {/* Live badge — shown for scores from raw allocations */}
-                        {/* (before official finalize+aggregate governance) */}
-                        {result.source === "live" && (
-                          <span className="text-[10px] bg-green-100 text-green-700 px-1.5 py-0.5 rounded-full font-medium">
-                            Live
-                          </span>
-                        )}
-                      </h3>
-                      <p className="text-xs text-gray-400 mt-0.5 capitalize">
-                        Intent: {result.intent || "N/A"}
-                        {result.evaluationMode &&
-                          ` • Mode: ${result.evaluationMode.replace("_", " ")}`}
-                      </p>
-                    </div>
-                    <span className={`text-xs font-bold ${perf.color}`}>
-                      {perf.label}
-                    </span>
-                  </div>
-
-                  {/* Score row */}
-                  <div className="grid grid-cols-4 gap-3">
-                    {/* Your Rank */}
-                    <div className="text-center">
-                      <p className="text-[10px] text-gray-500 font-medium uppercase mb-1">
-                        Rank
-                      </p>
-                      <div
-                        className={`w-10 h-10 rounded-full flex items-center justify-center mx-auto text-sm font-bold border-2 ${getRankColor(result.rank, result.totalTargets)}`}
-                      >
-                        {result.rank || "—"}
+                  <div className="p-5">
+                    {/* Card header */}
+                    <div className="flex items-start justify-between mb-4">
+                      <div>
+                        <h3 className="font-semibold text-gray-900 text-sm flex items-center gap-2">
+                          <Target className="h-4 w-4 text-indigo-500" />
+                          {sessionTitle || result.sessionType?.replace("_", " ") || "Evaluation Session"}
+                          {result.source === "live" && (
+                            <span className="text-[10px] bg-green-100 text-green-700 px-1.5 py-0.5 rounded-full font-medium">
+                              Live
+                            </span>
+                          )}
+                        </h3>
+                        <p className="text-xs text-gray-400 mt-0.5 capitalize">
+                          {result.sessionType?.replace("_", " ") || "N/A"}
+                          {result.intent && ` • Intent: ${result.intent}`}
+                          {result.evaluationMode &&
+                            ` • Mode: ${result.evaluationMode.replace("_", " ")}`}
+                        </p>
                       </div>
-                      <p className="text-[10px] text-gray-400 mt-1">
-                        of {result.totalTargets || "?"}
-                      </p>
+                      <span className={`text-xs font-bold ${perf.color}`}>
+                        {perf.label}
+                      </span>
                     </div>
 
-                    {/* Your Mean Score */}
-                    <div className="text-center">
-                      <p className="text-[10px] text-gray-500 font-medium uppercase mb-1">
-                        Your Score
-                      </p>
-                      <p className="text-xl font-bold text-gray-900">
-                        {(result.meanScore || 0).toFixed(1)}
-                      </p>
-                      <div className="flex items-center justify-center gap-1 mt-1">
-                        {getTrendIcon(result.meanScore, result.avgMean)}
-                        <span className="text-[10px] text-gray-400">
-                          avg: {(result.avgMean || 0).toFixed(1)}
-                        </span>
-                      </div>
-                    </div>
-
-                    {/* Consensus */}
-                    <div className="text-center">
-                      <p className="text-[10px] text-gray-500 font-medium uppercase mb-1">
-                        Consensus
-                      </p>
-                      <p className="text-xl font-bold text-gray-900">
-                        {result.consensusScore != null
-                          ? `${(result.consensusScore * 100).toFixed(0)}%`
-                          : "—"}
-                      </p>
-                      <p className="text-[10px] text-gray-400 mt-1">
-                        {result.consensusScore > 0.7
-                          ? "High agreement"
-                          : result.consensusScore > 0.4
-                            ? "Moderate"
-                            : "Low agreement"}
-                      </p>
-                    </div>
-
-                    {/* Evaluators */}
-                    <div className="text-center">
-                      <p className="text-[10px] text-gray-500 font-medium uppercase mb-1">
-                        Evaluators
-                      </p>
-                      <p className="text-xl font-bold text-gray-900">
-                        {result.judgeCount || "—"}
-                      </p>
-                      <p className="text-[10px] text-gray-400 mt-1">judges</p>
-                    </div>
-                  </div>
-
-                  {/* Score bar visualization */}
-                  <div className="mt-4">
-                    <div className="flex items-center justify-between text-[10px] text-gray-400 mb-1">
-                      <span>0</span>
-                      <span>Pool: {result.poolSize || "?"}</span>
-                    </div>
-                    <div className="h-3 bg-gray-100 rounded-full overflow-hidden relative">
-                      {/* Average marker */}
-                      {result.avgMean > 0 && result.poolSize > 0 && (
-                        <div
-                          className="absolute top-0 h-full w-0.5 bg-gray-400 z-10"
-                          style={{
-                            left: `${(result.avgMean / result.poolSize) * 100}%`,
-                          }}
-                          title={`Average: ${result.avgMean.toFixed(1)}`}
-                        />
-                      )}
-                      {/* Your score bar */}
-                      <div
-                        className="h-full bg-gradient-to-r from-indigo-400 to-indigo-600 rounded-full transition-all"
-                        style={{
-                          width: `${result.poolSize ? (result.meanScore / result.poolSize) * 100 : 0}%`,
-                        }}
-                      />
-                    </div>
-                  </div>
-
-                  {/* Date footer + Appeal */}
-                  <div className="flex items-center justify-between mt-3">
-                    {result.windowEnd && (
-                      <div className="flex items-center gap-1 text-[10px] text-gray-400">
-                        <Calendar className="h-3 w-3" />
-                        <span>
-                          Completed:{" "}
-                          {new Date(result.windowEnd).toLocaleDateString()}
-                        </span>
+                    {/* Weighted Score Banner (from evaluator data) */}
+                    {weightedScore != null && (
+                      <div className="mb-4 p-3 bg-gradient-to-r from-indigo-50 to-purple-50 rounded-xl border border-indigo-100">
+                        <div className="flex items-center justify-between">
+                          <div>
+                            <p className="text-[10px] text-indigo-600 font-semibold uppercase tracking-wide">Final Weighted Score</p>
+                            <p className="text-2xl font-bold text-indigo-700">
+                              {Number(weightedScore).toFixed(2)}
+                              <span className="text-sm font-normal text-indigo-400 ml-1">/ {scaleMax}</span>
+                            </p>
+                          </div>
+                          {confidence != null && (
+                            <div className="text-right">
+                              <p className="text-[10px] text-gray-500 font-medium">Confidence</p>
+                              <span className={`inline-block px-2 py-0.5 rounded-full text-xs font-semibold ${
+                                confidence >= 0.8 ? "bg-green-100 text-green-700" :
+                                confidence >= 0.5 ? "bg-yellow-100 text-yellow-700" :
+                                "bg-red-100 text-red-700"
+                              }`}>
+                                {(confidence * 100).toFixed(0)}%
+                              </span>
+                            </div>
+                          )}
+                        </div>
                       </div>
                     )}
-                    {/* Appeal badge or button */}
-                    {(() => {
-                      const existingAppeal = getAppealForSession(result.sessionId);
-                      if (existingAppeal) {
-                        const badge = APPEAL_STATUS_BADGE[existingAppeal.status] || APPEAL_STATUS_BADGE.pending;
-                        const BadgeIcon = badge.icon;
-                        return (
-                          <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold ${badge.bg} ${badge.text}`}>
-                            <BadgeIcon className="h-3 w-3" />
-                            {badge.label}
+
+                    {/* Score row */}
+                    <div className="grid grid-cols-4 gap-3">
+                      {/* Your Rank */}
+                      <div className="text-center">
+                        <p className="text-[10px] text-gray-500 font-medium uppercase mb-1">
+                          Rank
+                        </p>
+                        <div
+                          className={`w-10 h-10 rounded-full flex items-center justify-center mx-auto text-sm font-bold border-2 ${getRankColor(result.rank, result.totalTargets)}`}
+                        >
+                          {result.rank || "—"}
+                        </div>
+                        <p className="text-[10px] text-gray-400 mt-1">
+                          of {result.totalTargets || "?"}
+                        </p>
+                      </div>
+
+                      {/* Your Mean Score */}
+                      <div className="text-center">
+                        <p className="text-[10px] text-gray-500 font-medium uppercase mb-1">
+                          Your Score
+                        </p>
+                        <p className="text-xl font-bold text-gray-900">
+                          {(result.meanScore || 0).toFixed(1)}
+                        </p>
+                        <div className="flex items-center justify-center gap-1 mt-1">
+                          {getTrendIcon(result.meanScore, result.avgMean)}
+                          <span className="text-[10px] text-gray-400">
+                            avg: {(result.avgMean || 0).toFixed(1)}
                           </span>
-                        );
-                      }
-                      // Show appeal button only for finalized sessions
-                      if (result.status === "finalized" || result.source !== "live") {
-                        return (
+                        </div>
+                      </div>
+
+                      {/* Consensus */}
+                      <div className="text-center">
+                        <p className="text-[10px] text-gray-500 font-medium uppercase mb-1">
+                          Consensus
+                        </p>
+                        <p className="text-xl font-bold text-gray-900">
+                          {result.consensusScore != null
+                            ? `${(result.consensusScore * 100).toFixed(0)}%`
+                            : "—"}
+                        </p>
+                        <p className="text-[10px] text-gray-400 mt-1">
+                          {result.consensusScore > 0.7
+                            ? "High agreement"
+                            : result.consensusScore > 0.4
+                              ? "Moderate"
+                              : "Low agreement"}
+                        </p>
+                      </div>
+
+                      {/* Evaluators */}
+                      <div className="text-center">
+                        <p className="text-[10px] text-gray-500 font-medium uppercase mb-1">
+                          Evaluators
+                        </p>
+                        <p className="text-xl font-bold text-gray-900">
+                          {result.judgeCount || "—"}
+                        </p>
+                        <p className="text-[10px] text-gray-400 mt-1">judges</p>
+                      </div>
+                    </div>
+
+                    {/* Score bar visualization */}
+                    <div className="mt-4">
+                      <div className="flex items-center justify-between text-[10px] text-gray-400 mb-1">
+                        <span>0</span>
+                        <span>Pool: {result.poolSize || "?"}</span>
+                      </div>
+                      <div className="h-3 bg-gray-100 rounded-full overflow-hidden relative">
+                        {result.avgMean > 0 && result.poolSize > 0 && (
+                          <div
+                            className="absolute top-0 h-full w-0.5 bg-gray-400 z-10"
+                            style={{
+                              left: `${(result.avgMean / result.poolSize) * 100}%`,
+                            }}
+                            title={`Average: ${result.avgMean.toFixed(1)}`}
+                          />
+                        )}
+                        <div
+                          className="h-full bg-gradient-to-r from-indigo-400 to-indigo-600 rounded-full transition-all"
+                          style={{
+                            width: `${result.poolSize ? (result.meanScore / result.poolSize) * 100 : 0}%`,
+                          }}
+                        />
+                      </div>
+                    </div>
+
+                    {/* Date footer + Expand button + Appeal */}
+                    <div className="flex items-center justify-between mt-3">
+                      <div className="flex items-center gap-3">
+                        {result.windowEnd && (
+                          <div className="flex items-center gap-1 text-[10px] text-gray-400">
+                            <Calendar className="h-3 w-3" />
+                            <span>
+                              Completed:{" "}
+                              {new Date(result.windowEnd).toLocaleDateString()}
+                            </span>
+                          </div>
+                        )}
+                        {evalData && (
                           <button
-                            onClick={() => handleAppealClick(result.sessionId)}
-                            className="inline-flex items-center gap-1 px-2.5 py-1 text-[10px] font-medium text-amber-700 bg-amber-50 hover:bg-amber-100 border border-amber-200 rounded-full transition-colors"
+                            onClick={() => toggleSession(result.sessionId)}
+                            className="inline-flex items-center gap-1 px-2.5 py-1 text-[10px] font-medium text-indigo-600 hover:text-indigo-800 hover:bg-indigo-50 rounded-full transition-colors"
                           >
-                            <MessageSquare className="h-3 w-3" />
-                            Appeal Score
+                            {isExpanded ? (
+                              <>
+                                <ChevronUp className="h-3 w-3" />
+                                Hide Breakdown
+                              </>
+                            ) : (
+                              <>
+                                <ChevronDown className="h-3 w-3" />
+                                View Breakdown
+                              </>
+                            )}
                           </button>
-                        );
-                      }
-                      return null;
-                    })()}
+                        )}
+                      </div>
+                      {/* Appeal badge or button */}
+                      {(() => {
+                        const existingAppeal = getAppealForSession(result.sessionId);
+                        if (existingAppeal) {
+                          const badge = APPEAL_STATUS_BADGE[existingAppeal.status] || APPEAL_STATUS_BADGE.pending;
+                          const BadgeIcon = badge.icon;
+                          return (
+                            <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold ${badge.bg} ${badge.text}`}>
+                              <BadgeIcon className="h-3 w-3" />
+                              {badge.label}
+                            </span>
+                          );
+                        }
+                        if (result.status === "finalized" || result.source !== "live") {
+                          return (
+                            <button
+                              onClick={() => handleAppealClick(result.sessionId)}
+                              className="inline-flex items-center gap-1 px-2.5 py-1 text-[10px] font-medium text-amber-700 bg-amber-50 hover:bg-amber-100 border border-amber-200 rounded-full transition-colors"
+                            >
+                              <MessageSquare className="h-3 w-3" />
+                              Appeal Score
+                            </button>
+                          );
+                        }
+                        return null;
+                      })()}
+                    </div>
                   </div>
+
+                  {/* ====================================================== */}
+                  {/* EXPANDED: Detailed Breakdown Panel */}
+                  {/* ====================================================== */}
+                  {isExpanded && evalData && (
+                    <div className="border-t border-gray-100 bg-gray-50/50 px-5 py-4 space-y-4">
+
+                      {/* --- Per-Rubric Breakdown --- */}
+                      {(() => {
+                        const rubricMap = evalData.rubricNameMap || {};
+                        // Aggregate rubric marks across all judges
+                        const rubricAgg = {};
+                        evalData.rows.forEach((row) => {
+                          if (row.rubric_marks && typeof row.rubric_marks === "object") {
+                            Object.entries(row.rubric_marks).forEach(([rubricId, score]) => {
+                              if (!rubricAgg[rubricId]) rubricAgg[rubricId] = { scores: [], name: rubricMap[rubricId] || rubricId };
+                              rubricAgg[rubricId].scores.push({ judge: row.faculty_name, score: Number(score) });
+                            });
+                          }
+                        });
+                        const rubricEntries = Object.entries(rubricAgg);
+                        if (rubricEntries.length === 0) return null;
+
+                        return (
+                          <div>
+                            <h4 className="text-xs font-semibold text-gray-700 mb-2 flex items-center gap-1.5">
+                              <BarChart3 className="h-3.5 w-3.5 text-indigo-500" />
+                              Rubric-Wise Breakdown
+                            </h4>
+                            <div className="space-y-3">
+                              {rubricEntries.map(([rubricId, data]) => {
+                                const avg = data.scores.reduce((s, x) => s + x.score, 0) / data.scores.length;
+                                return (
+                                  <div key={rubricId} className="bg-white rounded-xl p-3 border border-gray-100">
+                                    <div className="flex items-center justify-between mb-2">
+                                      <span className="text-xs font-medium text-gray-800">{data.name}</span>
+                                      <span className="text-xs font-bold text-indigo-600">{avg.toFixed(1)}</span>
+                                    </div>
+                                    {/* Per-judge marks */}
+                                    <div className="space-y-1.5">
+                                      {data.scores.map((entry, i) => (
+                                        <div key={i} className="flex items-center gap-2">
+                                          <span className="text-[10px] text-gray-500 w-24 truncate">{entry.judge}</span>
+                                          <div className="flex-1 h-2 bg-gray-100 rounded-full overflow-hidden">
+                                            <div
+                                              className={`h-full rounded-full transition-all ${
+                                                entry.score === 0 ? "bg-red-400" : "bg-indigo-400"
+                                              }`}
+                                              style={{ width: `${Math.min((entry.score / (scaleMax || 10)) * 100, 100)}%` }}
+                                            />
+                                          </div>
+                                          <span className={`text-[10px] font-semibold w-6 text-right ${
+                                            entry.score === 0 ? "text-red-500" : "text-gray-600"
+                                          }`}>{entry.score}</span>
+                                        </div>
+                                      ))}
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        );
+                      })()}
+
+                      {/* --- Per-Judge Overall Marks --- */}
+                      {evalData.rows.some((r) => r.marks != null) && (
+                        <div>
+                          <h4 className="text-xs font-semibold text-gray-700 mb-2 flex items-center gap-1.5">
+                            <Users className="h-3.5 w-3.5 text-indigo-500" />
+                            Per-Judge Overall Marks
+                          </h4>
+                          <div className="grid gap-2">
+                            {evalData.rows.filter((r) => r.marks != null).map((row, i) => (
+                              <div key={i} className="bg-white rounded-xl p-3 border border-gray-100 flex items-center justify-between">
+                                <span className="text-xs font-medium text-gray-700">{row.faculty_name}</span>
+                                <span className="text-sm font-bold text-indigo-600">{Number(row.marks).toFixed(1)}</span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* --- Zero-Marks Feedback --- */}
+                      {evalData.rows.some((r) => r.zero_feedback && Object.keys(r.zero_feedback).length > 0) && (
+                        <div>
+                          <h4 className="text-xs font-semibold text-red-600 mb-2 flex items-center gap-1.5">
+                            <AlertTriangle className="h-3.5 w-3.5" />
+                            Zero-Mark Feedback
+                          </h4>
+                          <div className="space-y-2">
+                            {evalData.rows.map((row, i) => {
+                              if (!row.zero_feedback || typeof row.zero_feedback !== "object") return null;
+                              const entries = Object.entries(row.zero_feedback);
+                              if (entries.length === 0) return null;
+                              return entries.map(([rubricId, reason]) => (
+                                <div key={`${i}-${rubricId}`} className="bg-red-50 border border-red-200 rounded-xl p-3">
+                                  <p className="text-[10px] text-red-500 font-semibold mb-0.5">
+                                    {evalData.rubricNameMap[rubricId] || "Rubric"} — {row.faculty_name}
+                                  </p>
+                                  <p className="text-xs text-red-800">{reason}</p>
+                                </div>
+                              ));
+                            })}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* --- Faculty Feedback --- */}
+                      {evalData.rows.some((r) => r.feedback) && (
+                        <div>
+                          <h4 className="text-xs font-semibold text-gray-700 mb-2 flex items-center gap-1.5">
+                            <MessageSquare className="h-3.5 w-3.5 text-indigo-500" />
+                            Faculty Feedback
+                          </h4>
+                          <div className="space-y-2">
+                            {evalData.rows.filter((r) => r.feedback).map((row, i) => (
+                              <div key={i} className="bg-white rounded-xl p-3 border border-gray-100">
+                                <p className="text-[10px] text-indigo-500 font-semibold mb-1">{row.faculty_name}</p>
+                                <p className="text-xs text-gray-700 leading-relaxed">{row.feedback}</p>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
               );
             })}

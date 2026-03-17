@@ -7,7 +7,7 @@
 
 import React from "react";
 import { useNavigate, useLocation } from "react-router-dom";
-import { Home, ClipboardList, User, MoreHorizontal } from "lucide-react";
+import { Home, ClipboardList, User, MoreHorizontal, Clock } from "lucide-react";
 
 /**
  * Navigation Item Component
@@ -59,6 +59,12 @@ const BottomNavigation = () => {
       label: "Home",
       path: "/dashboard",
       isActive: location.pathname === "/dashboard",
+    },
+    {
+      icon: Clock,
+      label: "WorkLog",
+      path: "/worklog",
+      isActive: location.pathname === "/worklog",
     },
     {
       icon: ClipboardList,

@@ -15,6 +15,8 @@ import useAuth from "../../hooks/useAuth";
 import { getYearLabel } from "../../utils/yearUtils";
 import { getInitials } from "../../utils/helpers";
 import TrackSelectionModal from "./student/TrackSelectionModal";
+import StudentAppealsTab from "./student/StudentAppealsTab";
+import StudentComparativeReviewTab from "./student/ComparativeReviewTab";
 import {
   getMyTrack,
   selectTrack,
@@ -24,6 +26,7 @@ import {
   getMyEvaluator,
 } from "../../services/sessionPlannerApi";
 import { useDataChange } from "../../hooks/useSocketEvent";
+import { useCountdown } from "../../hooks/useCountdown";
 
 import {
   GraduationCap,
@@ -36,8 +39,6 @@ import {
   AlertCircle,
   Users,
   Snowflake,
-  Gauge,
-  ClipboardCheck,
   BookOpen,
   BarChart3,
   TrendingUp,
@@ -47,11 +48,24 @@ import {
   ChevronDown,
   ChevronUp,
   Target,
-  PlayCircle,
   Calendar,
+  Github,
+  Video,
+  ExternalLink,
+  Edit3,
+  Loader2,
+  ShieldCheck,
+  ShieldAlert,
+  MessageSquare,
+  Scale,
 } from "lucide-react";
 
 import * as cohortApi from "../../services/cohortApi";
+import {
+  getGitHubTokenStatus,
+  saveGitHubToken,
+  updateGitHubToken,
+} from "../../services/githubApi";
 
 // ============================================================
 // StudentDashboard Component
@@ -117,7 +131,6 @@ const StudentDashboard = ({ data, onRefresh }) => {
   const [myTeam, setMyTeam] = useState(null);
   const [myInvitations, setMyInvitations] = useState([]);
   const [myEvaluators, setMyEvaluators] = useState([]);
-  const [expandedSessions, setExpandedSessions] = useState({});
 
   const loadTrackData = useCallback(async () => {
     try {
@@ -184,6 +197,8 @@ const StudentDashboard = ({ data, onRefresh }) => {
     { id: "overview", label: "Overview", icon: GraduationCap },
     { id: "evaluations", label: "My Evaluations", icon: Layers },
     { id: "peer-suggestions", label: "Peer Suggestions", icon: Sparkles },
+    { id: "appeals", label: "Score Appeals", icon: MessageSquare },
+    { id: "comparative-review", label: "Comp. Review", icon: Scale },
   ];
 
   return (
@@ -279,10 +294,10 @@ const StudentDashboard = ({ data, onRefresh }) => {
         </div>
 
         {/* ====================================================== */}
-        {/* TRACK + TEAM + EVALUATOR INFO CARDS                    */}
+        {/* TRACK + TEAM INFO CARDS                                */}
         {/* ====================================================== */}
         {myTrack && (
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
             {/* Track Badge */}
             <div className="bg-white rounded-2xl shadow-sm border border-gray-200/50 p-4">
               <div className="flex items-center gap-2 mb-1">
@@ -364,273 +379,6 @@ const StudentDashboard = ({ data, onRefresh }) => {
                 </button>
               )}
             </div>
-
-            {/* Assigned Faculty */}
-            <div className="bg-white rounded-2xl shadow-sm border border-gray-200/50 p-4">
-              <div className="flex items-center gap-2 mb-1">
-                <GraduationCap className="h-4 w-4 text-green-500" />
-                <span className="text-xs text-gray-500 font-medium">
-                  Assigned Evaluator
-                </span>
-              </div>
-              {myEvaluators.length > 0 ? (
-                <div>
-                  <p className="text-sm font-bold text-gray-900 truncate">
-                    {myEvaluators[0].faculty_name ||
-                      myEvaluators[0].display_name ||
-                      "—"}
-                  </p>
-                  <p className="text-xs text-gray-500 mt-0.5">
-                    {myEvaluators.length} session{myEvaluators.length > 1 ? "s" : ""}
-                  </p>
-                </div>
-              ) : (
-                <p className="text-sm text-gray-400">Not yet assigned</p>
-              )}
-            </div>
-          </div>
-        )}
-
-        {/* Session Details Cards — shows all assigned sessions with venue, date, time, and marks */}
-        {/* Session Details Cards — grouped by session */}
-        {myEvaluators.length > 0 && (
-          <div className="mb-6 space-y-3">
-            {Object.values(
-              myEvaluators.reduce((acc, ev) => {
-                if (!acc[ev.session_id]) {
-                  acc[ev.session_id] = {
-                    ...ev,
-                    evaluators: [],
-                    hasFinalScore:
-                      ev.normalized_score !== null &&
-                      ev.normalized_score !== undefined,
-                  };
-                }
-                acc[ev.session_id].evaluators.push(ev);
-                return acc;
-              }, {})
-            ).map((sess, idx) => {
-              const { evaluators, hasFinalScore, normalized_score } = sess;
-              const allEvaluated = evaluators.every(
-                (e) => e.status === "evaluation_done" || e.status === "completed"
-              );
-              const anyMarks = evaluators.some((e) => e.marks_submitted_at);
-
-              // Determine overall card status
-              let statusLabel = "Assigned";
-              let statusClass = "bg-violet-100 text-violet-700";
-
-              if (hasFinalScore) {
-                statusLabel = "Graded";
-                statusClass = "bg-green-100 text-green-700";
-              } else if (allEvaluated) {
-                statusLabel = "Processing";
-                statusClass = "bg-blue-100 text-blue-700";
-              } else if (anyMarks) {
-                statusLabel = "In Progress";
-                statusClass = "bg-yellow-100 text-yellow-700";
-              }
-
-              return (
-                <div
-                  key={sess.id || idx}
-                  className={`rounded-2xl border p-4 ${hasFinalScore
-                    ? "bg-gradient-to-r from-green-50 to-emerald-50 border-green-200/50"
-                    : "bg-gradient-to-r from-violet-50 to-indigo-50 border-violet-200/50"
-                    }`}
-                >
-                  <div className="flex items-center justify-between mb-3">
-                    <h3 className="text-sm font-bold text-violet-800">
-                      {sess.session_title || "Untitled Session"}
-                    </h3>
-                    <span
-                      className={`text-xs font-medium px-2 py-0.5 rounded-full ${statusClass}`}
-                    >
-                      {statusLabel}
-                    </span>
-                  </div>
-
-                  {/* Evaluators List */}
-                  <div className="space-y-2 mb-3">
-                    <p className="text-xs text-gray-500 font-medium">
-                      Evaluators:
-                    </p>
-                    {evaluators.map((ev, i) => {
-                      const isDone = ev.marks_submitted_at;
-                      return (
-                        <div
-                          key={i}
-                          className="flex items-center justify-between text-xs bg-white/60 rounded-lg p-2 border border-violet-100"
-                        >
-                          <span className="font-semibold text-gray-700">
-                            {ev.faculty_name || ev.display_name || "—"}
-                          </span>
-                          <span
-                            className={
-                              isDone ? "text-green-600" : "text-gray-400"
-                            }
-                          >
-                            {isDone ? "Submitted" : "Pending"}
-                          </span>
-                        </div>
-                      );
-                    })}
-                  </div>
-
-                  {/* ── Final Score (Credibility Engine Result) — always /5 ── */}
-                  {hasFinalScore ? (
-                    <div className="bg-white/80 rounded-xl p-3 border border-green-200/60 mb-3">
-                      <div className="flex items-center justify-between mb-2">
-                        <span className="text-xs font-semibold text-green-700 flex items-center gap-1">
-                          🏆 Credibility-Weighted Score
-                        </span>
-                        <span className="text-xl font-bold text-green-700">
-                          {Number(sess.display_score ?? normalized_score).toFixed(1)}
-                          <span className="text-xs font-normal text-gray-400 ml-1">/ 5</span>
-                        </span>
-                      </div>
-
-                      {/* Per-rubric breakdown: show each judge's raw marks */}
-                      {(() => {
-                        // Use rubric_name_map (UUID→name) from backend for reliable mapping
-                        const nameMap = sess.rubric_name_map || {};
-                        // Collect all rubric UUIDs from evaluator marks
-                        const allUUIDs = new Set();
-                        evaluators.forEach(ev => {
-                          const rm = ev.rubric_marks
-                            ? (typeof ev.rubric_marks === 'string' ? JSON.parse(ev.rubric_marks) : ev.rubric_marks)
-                            : null;
-                          if (rm) Object.keys(rm).forEach(uid => allUUIDs.add(uid));
-                        });
-                        if (allUUIDs.size === 0) return null;
-                        // Sort by rubric name alphabetically
-                        const sortedUUIDs = Array.from(allUUIDs).sort((a, b) =>
-                          (nameMap[a] || a).localeCompare(nameMap[b] || b)
-                        );
-                        return (
-                          <div className="space-y-2 mt-2 pt-2 border-t border-green-100">
-                            <p className="text-[10px] text-gray-500 font-medium">Per-Rubric Breakdown</p>
-                            {sortedUUIDs.map((rubricUUID) => {
-                              const rubricName = nameMap[rubricUUID] || `Rubric ${rubricUUID.substring(0, 8)}`;
-                              return (
-                                <div key={rubricUUID} className="bg-gray-50 rounded-lg p-2">
-                                  <p className="text-[11px] font-semibold text-gray-700 mb-1">{rubricName}</p>
-                                  <div className="space-y-0.5">
-                                    {evaluators.map((ev, i) => {
-                                      const rm = ev.rubric_marks
-                                        ? (typeof ev.rubric_marks === 'string' ? JSON.parse(ev.rubric_marks) : ev.rubric_marks)
-                                        : null;
-                                      if (!rm) return null;
-                                      const mark = rm[rubricUUID] !== undefined ? Number(rm[rubricUUID]) : '—';
-                                      return (
-                                        <div key={`judge-${i}`} className="flex justify-between text-[10px] text-gray-600">
-                                          <span>{ev.faculty_name || 'Judge'}</span>
-                                          <span className="font-bold">{mark}</span>
-                                        </div>
-                                      );
-                                    })}
-                                  </div>
-                                </div>
-                              );
-                            })}
-                          </div>
-                        );
-                      })()}
-
-                      {/* Expandable Feedback Section */}
-                      {(() => {
-                        const hasFeedback = evaluators.some(ev => ev.feedback || ev.zero_feedback);
-                        if (!hasFeedback) return null;
-                        const fbKey = `feedback-${sess.session_id}`;
-                        return (
-                          <div className="mt-2 pt-2 border-t border-green-100">
-                            <button
-                              onClick={() => setExpandedSessions(prev => ({ ...prev, [fbKey]: !prev[fbKey] }))}
-                              className="text-[10px] font-medium text-violet-600 hover:text-violet-800 flex items-center gap-1 transition-colors"
-                            >
-                              {expandedSessions[fbKey] ? '▾' : '▸'} Faculty Feedback
-                            </button>
-                            {expandedSessions[fbKey] && (
-                              <div className="mt-1.5 space-y-2">
-                                {evaluators.map((ev, i) => {
-                                  const zf = ev.zero_feedback
-                                    ? (typeof ev.zero_feedback === 'string' ? JSON.parse(ev.zero_feedback) : ev.zero_feedback)
-                                    : null;
-                                  const hasContent = ev.feedback || zf;
-                                  if (!hasContent) return null;
-                                  return (
-                                    <div key={`fb-${i}`} className="bg-gray-50 rounded-lg p-2">
-                                      <p className="text-[10px] font-semibold text-gray-600 mb-1">{ev.faculty_name || 'Judge'}</p>
-                                      {ev.feedback && (
-                                        <p className="text-[10px] text-gray-700 mb-1">
-                                          <span className="font-medium text-gray-500">Comment:</span> {ev.feedback}
-                                        </p>
-                                      )}
-                                      {zf && Object.entries(zf).map(([rid, text]) => {
-                                        const nameMap = sess.rubric_name_map || {};
-                                        const rubricName = nameMap[rid] || rid.substring(0, 8);
-                                        return (
-                                          <p key={rid} className="text-[10px] text-red-600">
-                                            <span className="font-medium">⚠ Zero on {rubricName}:</span> {text}
-                                          </p>
-                                        );
-                                      })}
-                                    </div>
-                                  );
-                                })}
-                              </div>
-                            )}
-                          </div>
-                        );
-                      })()}
-                    </div>
-                  ) : (
-                    <div className="bg-white/40 rounded-xl p-3 border border-dashed border-gray-300 mb-3 text-center">
-                      <p className="text-xs text-gray-400">
-                        Score pending finalization
-                      </p>
-                    </div>
-                  )}
-
-                  {/* ── Scheduled Details (Consolidated or List) ── */}
-                  {evaluators.map((ev, i) => {
-                    if (
-                      !ev.scheduled_date &&
-                      !ev.scheduled_time &&
-                      !ev.scheduled_venue
-                    )
-                      return null;
-                    return (
-                      <div
-                        key={`sched-${i}`}
-                        className="bg-gradient-to-r from-indigo-50 to-violet-50 rounded-xl p-2 border border-indigo-200/60 mb-2"
-                      >
-                        <p className="text-[10px] uppercase tracking-wide font-bold text-indigo-600 mb-1">
-                          Meeting with {ev.faculty_name?.split(" ")[0]}
-                        </p>
-                        <div className="flex flex-wrap gap-2 text-xs">
-                          {ev.scheduled_date && (
-                            <span>
-                              📅{" "}
-                              {new Date(ev.scheduled_date).toLocaleDateString(
-                                "en-IN",
-                                { day: "numeric", month: "short" }
-                              )}
-                            </span>
-                          )}
-                          {ev.scheduled_time && (
-                            <span>🕐 {ev.scheduled_time.slice(0, 5)}</span>
-                          )}
-                          {ev.scheduled_venue && (
-                            <span>📍 {ev.scheduled_venue}</span>
-                          )}
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              );
-            })}
           </div>
         )}
 
@@ -1032,13 +780,21 @@ const StudentDashboard = ({ data, onRefresh }) => {
         {/* MY EVALUATIONS TAB */}
         {/* ====================================================== */}
         {activeTab === "evaluations" && (
-          <StudentEvaluationsTab sections={sections} navigate={navigate} />
+          <StudentEvaluationsTab navigate={navigate} myEvaluators={myEvaluators} />
         )}
 
         {/* ====================================================== */}
         {/* PEER SUGGESTIONS TAB */}
         {/* ====================================================== */}
         {activeTab === "peer-suggestions" && <StudentPeerSuggestionsTab />}
+
+        {/* ====================================================== */}
+        {/* SCORE APPEALS TAB */}
+        {/* ====================================================== */}
+        {activeTab === "appeals" && <StudentAppealsTab />}
+
+        {/* Comparative Review tab — head-to-head team comparison */}
+        {activeTab === "comparative-review" && <StudentComparativeReviewTab />}
       </main>
     </div>
   );
@@ -1056,8 +812,8 @@ const StudentPeerSuggestionsCompact = ({ onViewAll }) => {
       try {
         const result = await cohortApi.getPeerSuggestions({ limit: 3 });
         setSuggestions(result.data || []);
-      } catch (err) {
-        console.error(err);
+      } catch {
+        // Silently handle — peer suggestions are non-critical
       } finally {
         setLoading(false);
       }
@@ -1133,356 +889,355 @@ const StudentPeerSuggestionsCompact = ({ onViewAll }) => {
 };
 
 // ============================================================
-// STUDENT EVALUATIONS TAB — Full cohort assignments + eval list
+// COUNTDOWN BADGE — Live timer for evaluation sessions
 // ============================================================
-const StudentEvaluationsTab = ({ sections, navigate }) => {
-  const [assignments, setAssignments] = useState(sections.assignedEvaluations || []);
-  const [loading, setLoading] = useState(false);
-  const [startingId, setStartingId] = useState(null);
-  const [error, setError] = useState(null);
+// Helper: parse evaluator date/time into a local datetime string
+const buildTargetStr = (ev) => {
+  const raw = ev.scheduled_date || ev.session_date;
+  const t = ev.scheduled_time || ev.session_time;
+  if (!raw) return null;
+  let dateStr;
+  if (typeof raw === "string" && raw.includes("T")) {
+    const local = new Date(raw);
+    const y = local.getFullYear();
+    const m = String(local.getMonth() + 1).padStart(2, "0");
+    const dd = String(local.getDate()).padStart(2, "0");
+    dateStr = `${y}-${m}-${dd}`;
+  } else {
+    dateStr = raw;
+  }
+  return t ? `${dateStr}T${t}` : `${dateStr}T00:00:00`;
+};
 
-  // Use props directly - data is already fetched by usePersonalization
+// Small inline countdown
+const InlineCountdown = ({ evaluator }) => {
+  const target = buildTargetStr(evaluator);
+  const { days, hours, minutes, seconds, isPast } = useCountdown(target);
+  if (!target) return null;
+  if (isPast && evaluator.marks_submitted_at) return <span className="text-[10px] font-semibold text-emerald-500">Done</span>;
+  if (isPast) return <span className="text-[10px] font-semibold text-red-400">Missed</span>;
+  return (
+    <span className="font-mono text-[10px] text-violet-600 bg-violet-500/5 rounded-md px-1.5 py-0.5">
+      {days > 0 && `${days}d `}{String(hours).padStart(2,"0")}:{String(minutes).padStart(2,"0")}:{String(seconds).padStart(2,"0")}
+    </span>
+  );
+};
+
+// Session-level missed badge
+const SessionStatusBadge = ({ evaluators, allDone }) => {
+  const latestTarget = (() => {
+    let latest = null;
+    for (const ev of evaluators) {
+      const full = buildTargetStr(ev);
+      if (full && (!latest || new Date(full) > new Date(latest))) latest = full;
+    }
+    return latest;
+  })();
+  const { isPast } = useCountdown(latestTarget);
+  if (!latestTarget || !isPast || allDone) return null;
+  return (
+    <div className="flex items-center gap-1 px-2 py-1 mb-1 rounded-md bg-red-500/5">
+      <AlertCircle className="h-2.5 w-2.5 text-red-400" />
+      <span className="text-[9px] text-red-400 font-medium">Evaluation window passed</span>
+    </div>
+  );
+};
+
+// ============================================================
+// STUDENT EVALUATIONS TAB
+// ============================================================
+const StudentEvaluationsTab = ({ navigate, myEvaluators = [] }) => {
+  // --- GitHub Token State ---
+  const [tokenStatus, setTokenStatus] = useState(null);
+  const [tokenLoading, setTokenLoading] = useState(true);
+  const [tokenInput, setTokenInput] = useState("");
+  const [tokenSaving, setTokenSaving] = useState(false);
+  const [tokenError, setTokenError] = useState("");
+  const [tokenEditing, setTokenEditing] = useState(false);
+
+  // Fetch token status on mount
   useEffect(() => {
-    if (sections.assignedEvaluations) {
-      setAssignments(sections.assignedEvaluations);
-    }
-  }, [sections.assignedEvaluations]);
+    (async () => {
+      try {
+        const res = await getGitHubTokenStatus();
+        setTokenStatus(res.data);
+      } catch { /* no token yet */ }
+      finally { setTokenLoading(false); }
+    })();
+  }, []);
 
-  const handleStartEvaluation = async (assignmentId, e) => {
-    e.stopPropagation();
-    setStartingId(assignmentId);
-    setError(null);
+  const handleTokenSubmit = async () => {
+    if (!tokenInput.trim() || tokenInput.trim().length < 10) {
+      setTokenError("Please enter a valid GitHub Personal Access Token");
+      return;
+    }
+    setTokenSaving(true);
+    setTokenError("");
     try {
-      const result = await cohortApi.startEvaluation(assignmentId);
-      const sessionId = result.data?.sessionId;
-      if (sessionId) {
-        navigate(`/scarcity/evaluate/${sessionId}`);
-      }
+      const fn = tokenStatus?.is_valid ? updateGitHubToken : saveGitHubToken;
+      const res = await fn(tokenInput.trim());
+      setTokenStatus(res.data);
+      setTokenInput("");
+      setTokenEditing(false);
     } catch (err) {
-      setError(err.response?.data?.error || err.message);
-      setStartingId(null);
+      setTokenError(err.response?.data?.error || "Failed to save token. Check scopes: public_repo, read:user, user:email");
+    } finally {
+      setTokenSaving(false);
     }
   };
 
-  const statusColors = {
-    pending: "bg-gray-100 text-gray-600",
-    session_created: "bg-blue-100 text-blue-700",
-    in_progress: "bg-amber-100 text-amber-700",
-    completed: "bg-green-100 text-green-700",
-  };
+  const sessions = Object.values(
+    myEvaluators.reduce((acc, ev) => {
+      if (!acc[ev.session_id]) acc[ev.session_id] = { ...ev, evaluators: [] };
+      acc[ev.session_id].evaluators.push(ev);
+      return acc;
+    }, {})
+  );
 
   return (
-    <div className="space-y-6">
-      {/* Scheduled Evaluations (Faculty -> Student) */}
-      {sections.facultySchedules && sections.facultySchedules.length > 0 && (
-        <div className="bg-white rounded-2xl shadow-lg border border-violet-200/50 p-6">
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
-              <Calendar className="h-5 w-5 text-violet-600" />
-              Scheduled Evaluations
-            </h2>
-            <span className="bg-violet-100 text-violet-700 text-xs font-medium px-2.5 py-0.5 rounded-full">
-              {sections.facultySchedules.length} upcoming
-            </span>
-          </div>
-          <div className="space-y-3">
-            {sections.facultySchedules.map((schedule, index) => (
-              <div
-                key={schedule.id || index}
-                className="border border-violet-100 rounded-xl p-4 transition-colors hover:border-violet-300 hover:bg-violet-50/30"
-              >
-                <div className="flex items-start justify-between">
-                  <div>
-                    <h3 className="font-medium text-gray-900 text-sm">
-                      {schedule.session_title}
-                    </h3>
-                    <div className="flex items-center gap-2 text-xs text-gray-500 mt-1">
-                      <Users className="h-3 w-3" />
-                      <span>Evaluator: {schedule.faculty_name}</span>
-                    </div>
-                  </div>
-                  <div className="text-right">
-                    <div className="flex items-center justify-end gap-1.5 text-sm font-medium text-violet-700">
-                      <Clock className="h-4 w-4" />
-                      {schedule.scheduled_time}
-                    </div>
-                    <div className="text-xs text-gray-500 mt-0.5">
-                      {new Date(schedule.scheduled_date).toLocaleDateString(undefined, {
-                        weekday: 'short',
-                        month: 'short',
-                        day: 'numeric'
-                      })}
-                    </div>
-                  </div>
-                </div>
-                {schedule.venue && (
-                  <div className="mt-2 flex items-center gap-1.5 text-xs text-gray-500 bg-gray-50 px-2 py-1 rounded-md w-fit">
-                    <Target className="h-3 w-3" />
-                    <span>Venue: {schedule.venue}</span>
-                  </div>
-                )}
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
+    <div className="min-h-[60vh] rounded-3xl bg-gradient-to-br from-violet-100/50 via-indigo-50/40 to-purple-100/50 px-10 py-8 -mx-2 relative overflow-hidden">
+      {/* Glass background blobs */}
+      <div className="absolute top-10 left-10 w-40 h-40 rounded-full bg-violet-300/20 blur-3xl pointer-events-none" />
+      <div className="absolute bottom-10 right-10 w-48 h-48 rounded-full bg-indigo-300/20 blur-3xl pointer-events-none" />
+      <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-60 h-60 rounded-full bg-purple-200/15 blur-3xl pointer-events-none" />
 
-      {/* Cohort Assignments Section */}
-      <div className="bg-white rounded-2xl shadow-lg border border-gray-200/50 p-6">
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
-            <Layers className="h-5 w-5 text-blue-600" />
-            Cohort Assignments
-          </h2>
-          {assignments.length > 0 && (
-            <span className="bg-blue-100 text-blue-700 text-xs font-medium px-2.5 py-0.5 rounded-full">
-              {assignments.length} assigned
-            </span>
-          )}
-        </div>
-        {error && (
-          <div className="mb-3 p-2 bg-red-50 text-red-700 rounded-lg text-xs">
-            {error}
+      {/* Page title */}
+      <div className="mb-5 relative">
+        <h2 className="text-lg font-bold text-gray-800 flex items-center gap-2">
+          <GraduationCap className="h-5 w-5 text-violet-500" />
+          My Evaluations
+        </h2>
+        <p className="text-xs text-gray-400 mt-0.5">Faculty evaluation sessions assigned to you</p>
+      </div>
+
+      {/* ── GitHub Token Banner ── */}
+      <div className="relative mb-5">
+        {tokenLoading ? (
+          <div className="bg-white/30 backdrop-blur-xl rounded-2xl border border-white/50 p-4 flex items-center gap-3">
+            <Loader2 className="h-4 w-4 animate-spin text-gray-400" />
+            <span className="text-xs text-gray-400">Checking GitHub token...</span>
           </div>
-        )}
-        {loading ? (
-          <div className="flex items-center justify-center py-8">
-            <div className="animate-spin h-6 w-6 border-2 border-blue-500 border-t-transparent rounded-full" />
-          </div>
-        ) : assignments.length === 0 ? (
-          <div className="text-center py-10">
-            <Target className="h-12 w-12 mx-auto mb-3 text-gray-300" />
-            <p className="text-sm font-medium text-gray-500">
-              No cohort assignments yet
-            </p>
-            <p className="text-xs text-gray-400 mt-1">
-              When your faculty assigns you to evaluation cohorts, they'll
-              appear here.
-            </p>
+        ) : tokenStatus?.is_valid && !tokenEditing ? (
+          <div className="bg-emerald-500/5 backdrop-blur-xl rounded-2xl border border-emerald-500/15 p-4 flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className="w-8 h-8 rounded-xl bg-emerald-500/10 flex items-center justify-center">
+                <ShieldCheck className="h-4 w-4 text-emerald-500" />
+              </div>
+              <div>
+                <p className="text-sm font-semibold text-gray-800 flex items-center gap-2">
+                  GitHub Linked
+                  <span className="text-[10px] font-medium bg-emerald-500/10 text-emerald-600 px-2 py-0.5 rounded-full">
+                    @{tokenStatus.github_username}
+                  </span>
+                </p>
+                <p className="text-[10px] text-gray-400 mt-0.5">
+                  Token valid — Last verified {tokenStatus.last_validated_at ? new Date(tokenStatus.last_validated_at).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" }) : "recently"}
+                </p>
+              </div>
+            </div>
+            <button
+              onClick={() => setTokenEditing(true)}
+              className="flex items-center gap-1 px-3 py-1.5 text-[10px] font-semibold text-gray-500 hover:text-violet-600 hover:bg-violet-500/5 rounded-lg transition-colors"
+            >
+              <Edit3 className="h-3 w-3" />
+              Edit
+            </button>
           </div>
         ) : (
-          <div className="space-y-3">
-            {assignments.map((a) => (
-              <div
-                key={a.assignment_id}
-                onClick={() => {
-                  if (a.session_id)
-                    navigate(`/scarcity/evaluate/${a.session_id}`);
-                }}
-                className={`border border-gray-100 rounded-xl p-4 transition-colors ${a.session_id
-                  ? "hover:border-blue-200 hover:bg-blue-50/30 cursor-pointer"
-                  : ""
-                  }`}
-              >
-                <div className="flex items-start justify-between mb-2">
-                  <div>
-                    <h3 className="font-medium text-gray-900 text-sm">
-                      {a.cohort_name || "Assigned Evaluation"}
-                    </h3>
-                    <p className="text-xs text-gray-400 mt-0.5">
-                      Type: {a.target_type?.replace("_", " ") || "N/A"}
-                      {a.deadline && (
-                        <span>
-                          {" "}
-                          — Due {new Date(a.deadline).toLocaleDateString()}
-                        </span>
-                      )}
-                    </p>
-                  </div>
-                  {/* Credibility Engine: Final Result Display */}
-                  {a.session_status === 'FINALIZED' && (a.display_score != null || a.normalized_score != null) ? (
-                    <div className="text-right">
-                      <div className="flex items-center justify-end gap-2 mb-1">
-                        <span className="text-sm font-bold text-gray-900 bg-gray-100 px-2 py-1 rounded border border-gray-200">
-                          Final: {Number(a.display_score ?? a.normalized_score).toFixed(2)} / 5
-                        </span>
-                      </div>
-                      {a.confidence_score != null && (
-                        <span
-                          className={`text-[10px] px-2 py-0.5 rounded-full border ${Number(a.confidence_score) > 0.7
-                            ? "bg-green-50 text-green-700 border-green-100"
-                            : Number(a.confidence_score) > 0.4
-                              ? "bg-amber-50 text-amber-700 border-amber-100"
-                              : "bg-red-50 text-red-700 border-red-100"
-                            }`}
-                        >
-                          {Number(a.confidence_score) > 0.7 ? "High Conf." : Number(a.confidence_score) > 0.4 ? "Med Conf." : "Low Conf."}
-                        </span>
-                      )}
-                    </div>
-                  ) : (
-                    <span
-                      className={`px-2.5 py-0.5 text-xs font-medium rounded-full shrink-0 ${statusColors[a.assignment_status] ||
-                        "bg-gray-100 text-gray-600"
-                        }`}
-                    >
-                      {a.session_status === 'FINALIZED' ? 'Completed' : (a.assignment_status?.replace("_", " ") || "Pending")}
-                    </span>
-                  )}
-                </div>
-
-                {/* Action: Start Evaluation when no session yet */}
-                {!a.session_id && a.assignment_status !== "completed" && (
-                  <button
-                    onClick={(e) => handleStartEvaluation(a.assignment_id, e)}
-                    disabled={startingId === a.assignment_id}
-                    className="mt-2 w-full inline-flex items-center justify-center gap-2 px-4 py-2 text-sm font-medium
-                               text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors
-                               disabled:opacity-50 disabled:cursor-not-allowed"
-                  >
-                    {startingId === a.assignment_id ? (
-                      <>
-                        <RefreshCw className="h-4 w-4 animate-spin" />
-                        Starting...
-                      </>
-                    ) : (
-                      <>
-                        <PlayCircle className="h-4 w-4" />
-                        Start Evaluation
-                      </>
-                    )}
-                  </button>
-                )}
-                {a.session_id && a.assignment_status !== "completed" && (
-                  <div className="flex items-center gap-1 text-xs text-blue-500 mt-2">
-                    <PlayCircle className="h-3 w-3" />
-                    <span>Click to continue evaluation</span>
-                  </div>
-                )}
+          <div className="bg-amber-500/5 backdrop-blur-xl rounded-2xl border border-amber-500/15 p-4">
+            <div className="flex items-center gap-3 mb-3">
+              <div className="w-8 h-8 rounded-xl bg-amber-500/10 flex items-center justify-center">
+                <ShieldAlert className="h-4 w-4 text-amber-500" />
               </div>
-            ))}
+              <div>
+                <p className="text-sm font-semibold text-gray-800">
+                  {tokenEditing ? "Update GitHub Token" : "GitHub Token Required"}
+                </p>
+                <p className="text-[10px] text-gray-400 mt-0.5">
+                  Paste your GitHub Personal Access Token (needs: public_repo, read:user, user:email scopes)
+                </p>
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              <input
+                type="password"
+                value={tokenInput}
+                onChange={(e) => { setTokenInput(e.target.value); setTokenError(""); }}
+                placeholder="ghp_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+                className="flex-1 px-3 py-2 text-xs bg-white/60 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-violet-400 focus:border-transparent placeholder-gray-300"
+                onKeyDown={(e) => e.key === "Enter" && handleTokenSubmit()}
+              />
+              <button
+                onClick={handleTokenSubmit}
+                disabled={tokenSaving || !tokenInput.trim()}
+                className="px-4 py-2 text-xs font-semibold text-white bg-gradient-to-r from-violet-500 to-indigo-500 rounded-xl hover:from-violet-600 hover:to-indigo-600 disabled:opacity-40 transition-all flex items-center gap-1.5"
+              >
+                {tokenSaving ? <Loader2 className="h-3 w-3 animate-spin" /> : <Github className="h-3 w-3" />}
+                {tokenSaving ? "Validating..." : tokenEditing ? "Update" : "Link GitHub"}
+              </button>
+              {tokenEditing && (
+                <button
+                  onClick={() => { setTokenEditing(false); setTokenInput(""); setTokenError(""); }}
+                  className="px-3 py-2 text-xs text-gray-400 hover:text-gray-600 rounded-xl transition-colors"
+                >
+                  Cancel
+                </button>
+              )}
+            </div>
+            {tokenError && (
+              <p className="text-[10px] text-red-500 mt-2 flex items-center gap-1">
+                <AlertCircle className="h-3 w-3" />
+                {tokenError}
+              </p>
+            )}
           </div>
         )}
       </div>
 
-      {/* Assigned Evaluations from sessions (non-cohort) */}
-      {sections.assignedEvaluations &&
-        sections.assignedEvaluations.length > 0 && (
-          <div className="bg-white rounded-2xl shadow-lg border border-indigo-200/50 p-6">
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
-                <ClipboardCheck className="h-5 w-5 text-indigo-600" />
-                Faculty-Assigned Evaluations
-              </h2>
-              <span className="bg-indigo-100 text-indigo-700 text-xs font-medium px-2.5 py-0.5 rounded-full">
-                {sections.assignedEvaluations.length} sessions
-              </span>
-            </div>
-            <div className="space-y-3">
-              {sections.assignedEvaluations.map((evalSession, index) => (
-                <div
-                  key={evalSession.session_id || index}
-                  onClick={() => navigate("/my-results")}
-                  className="border border-indigo-100 rounded-xl p-4 hover:border-indigo-300 hover:bg-indigo-50/30 transition-colors cursor-pointer"
-                >
-                  <div className="flex items-start justify-between mb-2">
-                    <div>
-                      <h3 className="font-medium text-gray-900 text-sm capitalize">
-                        {evalSession.session_type?.replace("_", " ") ||
-                          "Evaluation"}
-                      </h3>
-                      <p className="text-xs text-gray-400 capitalize mt-0.5">
-                        Intent: {evalSession.intent || "N/A"}
-                        {evalSession.evaluation_mode && (
-                          <span>
-                            {" "}
-                            • Mode:{" "}
-                            {evalSession.evaluation_mode.replace("_", " ")}
-                          </span>
-                        )}
-                      </p>
-                    </div>
-                    <span
-                      className={`text-xs px-2 py-0.5 rounded-full font-medium ${getStatusColor(evalSession.status)}`}
-                    >
-                      {formatStatus(evalSession.status)}
-                    </span>
-                  </div>
-                  {evalSession.created_by_name && (
-                    <div className="flex items-center gap-1 text-xs text-gray-400 mt-1">
-                      <BookOpen className="h-3 w-3" />
-                      <span>Assigned by: {evalSession.created_by_name}</span>
-                    </div>
-                  )}
-                  {evalSession.session_id && (
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        navigate(
-                          `/scarcity/weighted-results/${evalSession.session_id}`,
-                        );
-                      }}
-                      className="mt-2 inline-flex items-center gap-1 text-xs text-purple-600 hover:text-purple-800 font-medium hover:underline"
-                    >
-                      <TrendingUp className="h-3 w-3" />
-                      View Weighted Results
-                    </button>
-                  )}
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
+      {!myEvaluators.length ? (
+        <div className="relative bg-white/30 backdrop-blur-2xl rounded-2xl border border-white/50 shadow-[0_8px_32px_rgba(124,58,237,0.08)] p-8 text-center hover:bg-white/40 hover:shadow-[0_12px_40px_rgba(124,58,237,0.12)] transition-all duration-300">
+          <GraduationCap className="h-10 w-10 mx-auto mb-3 text-violet-300" />
+          <p className="text-sm font-medium text-gray-500">No evaluations assigned yet</p>
+          <p className="text-xs text-gray-400 mt-1">They will appear here once assigned.</p>
+        </div>
+      ) : (
+        <div className="grid grid-cols-2 gap-3 relative">
+          {sessions.map((sess, idx) => {
+            const { evaluators } = sess;
+            const allDone = evaluators.every((e) => e.marks_submitted_at);
+            const anyDone = evaluators.some((e) => e.marks_submitted_at);
+            const doneCount = evaluators.filter((e) => e.marks_submitted_at).length;
 
-      {/* Scarcity Evaluations (where student is evaluator) */}
-      {sections.scarcityEvaluations &&
-        sections.scarcityEvaluations.length > 0 && (
-          <div className="bg-white rounded-2xl shadow-lg border border-gray-200/50 p-6">
-            <h2 className="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
-              <Gauge className="h-5 w-5 text-purple-500" />
-              Scarcity Evaluations
-            </h2>
-            <div className="space-y-3">
-              {sections.scarcityEvaluations.map((s, index) => (
-                <div
-                  key={s.sessionId || index}
-                  onClick={() =>
-                    s.sessionId && navigate(`/scarcity/evaluate/${s.sessionId}`)
-                  }
-                  className="border border-gray-100 rounded-xl p-4 hover:border-purple-200 hover:bg-purple-50/30 transition-colors cursor-pointer"
-                >
-                  <div className="flex items-start justify-between mb-2">
+            return (
+              <div
+                key={sess.session_id || idx}
+                className="bg-white/30 backdrop-blur-2xl rounded-2xl border border-white/50 shadow-[0_8px_32px_rgba(124,58,237,0.08)] overflow-hidden hover:bg-white/45 hover:shadow-[0_12px_40px_rgba(124,58,237,0.14)] hover:border-white/70 hover:-translate-y-0.5 transition-all duration-300 cursor-default flex flex-col"
+              >
+                {/* Header */}
+                <div className="px-4 py-3 flex items-center justify-between">
+                  <div className="flex items-center gap-2.5">
+                    <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-violet-400 to-indigo-400 flex items-center justify-center shadow-md shadow-violet-400/20">
+                      <GraduationCap className="h-4 w-4 text-white" />
+                    </div>
                     <div>
-                      <h3 className="font-medium text-gray-900 text-sm capitalize">
-                        {s.evaluationMode?.replace("_", " ") || "Evaluation"}
+                      <h3 className="text-sm font-bold text-gray-900">
+                        {sess.session_title || "Untitled Session"}
                       </h3>
-                      <p className="text-xs text-gray-400 capitalize mt-0.5">
-                        Intent: {s.intent || "N/A"}
-                      </p>
+                      <p className="text-[10px] text-gray-400 mt-0.5">{doneCount}/{evaluators.length} completed</p>
                     </div>
-                    <span
-                      className={`text-xs px-2 py-0.5 rounded-full font-medium ${getStatusColor(s.status)}`}
-                    >
-                      {formatStatus(s.status)}
-                    </span>
                   </div>
-                  {s.poolSize && (
-                    <div className="flex items-center gap-2 text-xs text-gray-400 mt-1">
-                      <Gauge className="h-3 w-3" />
-                      <span>
-                        Pool: {s.poolSize} points
-                        {s.allocatedTotal !== undefined &&
-                          ` • Used: ${s.allocatedTotal}`}
-                      </span>
-                    </div>
-                  )}
-                  {s.sessionId && (
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        navigate(`/scarcity/weighted-results/${s.sessionId}`);
-                      }}
-                      className="mt-2 inline-flex items-center gap-1 text-xs text-purple-600 hover:text-purple-800 font-medium hover:underline"
-                    >
-                      <TrendingUp className="h-3 w-3" />
-                      View Weighted Results
-                    </button>
+                  <span className={`text-[10px] font-semibold px-2.5 py-1 rounded-full backdrop-blur-sm ${
+                    allDone ? "bg-emerald-500/10 text-emerald-600 border border-emerald-500/15" :
+                    anyDone ? "bg-amber-500/10 text-amber-600 border border-amber-500/15" :
+                    "bg-violet-500/10 text-violet-600 border border-violet-500/15"
+                  }`}>
+                    {allDone ? "Completed" : anyDone ? "In Progress" : "Upcoming"}
+                  </span>
+                  {!tokenStatus?.is_valid && !allDone && (
+                    <span className="text-[10px] font-semibold px-2 py-1 rounded-full bg-red-500/10 text-red-500 border border-red-500/15 flex items-center gap-1">
+                      <ShieldAlert className="h-2.5 w-2.5" />
+                      Token Missing
+                    </span>
                   )}
                 </div>
-              ))}
-            </div>
-          </div>
-        )}
+
+                {/* Progress */}
+                <div className="mx-4 h-1 rounded-full bg-violet-500/5 overflow-hidden">
+                  <div
+                    className="h-full rounded-full bg-gradient-to-r from-violet-300 to-indigo-300 transition-all duration-500"
+                    style={{ width: `${(doneCount / evaluators.length) * 100}%` }}
+                  />
+                </div>
+
+                {/* Faculty list */}
+                <div className="px-4 py-3 space-y-1 flex-1">
+                  <SessionStatusBadge evaluators={evaluators} allDone={allDone} />
+                  {evaluators.map((ev, i) => {
+                    const hasSchedule = ev.scheduled_date || ev.scheduled_time || ev.scheduled_venue;
+                    const isDone = !!ev.marks_submitted_at;
+                    return (
+                      <div
+                        key={i}
+                        className={`flex items-center gap-2.5 p-2.5 rounded-xl transition-all duration-200 ${
+                          isDone ? "bg-emerald-500/5" : "bg-white/20 hover:bg-white/50 hover:shadow-sm"
+                        }`}
+                      >
+                        {/* Avatar */}
+                        <div className={`w-7 h-7 rounded-full flex items-center justify-center text-[10px] font-bold flex-shrink-0 ${
+                          isDone ? "bg-emerald-500/15 text-emerald-500" : "bg-violet-500/10 text-violet-600"
+                        }`}>
+                          {isDone ? <CheckCircle className="h-3.5 w-3.5" /> : (ev.faculty_name || "F")[0]}
+                        </div>
+
+                        {/* Info */}
+                        <div className="flex-1 min-w-0">
+                          <p className={`text-xs font-semibold leading-tight ${isDone ? "text-gray-400" : "text-gray-800"}`}>
+                            {ev.faculty_name || ev.display_name || "\u2014"}
+                          </p>
+                          {hasSchedule && !isDone && (
+                            <p className="text-[10px] text-gray-400 mt-0.5 flex items-center gap-2">
+                              {ev.scheduled_date && (
+                                <span className="flex items-center gap-0.5">
+                                  <Calendar className="h-2.5 w-2.5" />
+                                  {new Date(ev.scheduled_date).toLocaleDateString("en-IN", { day: "numeric", month: "short" })}
+                                </span>
+                              )}
+                              {ev.scheduled_time && (
+                                <span className="flex items-center gap-0.5">
+                                  <Clock className="h-2.5 w-2.5" />
+                                  {ev.scheduled_time.slice(0, 5)}
+                                </span>
+                              )}
+                              {ev.scheduled_venue && (
+                                <span className="text-violet-400 font-medium">{ev.scheduled_venue}</span>
+                              )}
+                            </p>
+                          )}
+                          {ev.meet_link && !isDone && (
+                            <a
+                              href={ev.meet_link}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="mt-1 inline-flex items-center gap-1 text-[10px] font-semibold text-blue-500 bg-blue-500/5 hover:bg-blue-500/10 px-2 py-0.5 rounded-lg transition-colors"
+                            >
+                              <Video className="h-2.5 w-2.5" />
+                              Join Meeting
+                              <ExternalLink className="h-2 w-2" />
+                            </a>
+                          )}
+                          {!hasSchedule && !isDone && (
+                            <p className="text-[10px] text-gray-300 mt-0.5 italic">Not scheduled yet</p>
+                          )}
+                        </div>
+
+                        {/* Timer */}
+                        <div className="flex-shrink-0">
+                          {hasSchedule ? <InlineCountdown evaluator={ev} /> : (
+                            isDone && <span className="text-[10px] text-emerald-400 font-medium">Done</span>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {/* View Results */}
+                {allDone && (
+                  <div className="px-4 pb-3">
+                    <button
+                      onClick={() => navigate("/my-results")}
+                      className="w-full text-xs font-semibold text-white bg-gradient-to-r from-violet-400 to-indigo-400 hover:from-violet-500 hover:to-indigo-500 rounded-xl py-2 transition-all duration-200 flex items-center justify-center gap-1.5 shadow-md shadow-violet-400/20 hover:shadow-lg hover:shadow-violet-400/30 hover:-translate-y-0.5"
+                    >
+                      <TrendingUp className="h-3.5 w-3.5" />
+                      View Results
+                    </button>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 };
@@ -1500,8 +1255,8 @@ const StudentPeerSuggestionsTab = () => {
       try {
         const result = await cohortApi.getPeerSuggestions({ limit: 20 });
         setSuggestions(result.data || []);
-      } catch (err) {
-        console.error(err);
+      } catch {
+        // Silently handle — peer suggestions are non-critical
       } finally {
         setLoading(false);
       }
@@ -1614,22 +1369,27 @@ const StudentPeerSuggestionsTab = () => {
                       <p className="text-xs font-medium text-gray-500 mb-1">
                         Compatibility Factors
                       </p>
-                      {Object.entries(s.factors).map(([key, val]) => (
-                        <div key={key} className="flex items-center gap-2">
-                          <span className="text-xs text-gray-500 w-24 truncate capitalize">
-                            {key.replace(/_/g, " ")}
-                          </span>
-                          <div className="flex-1 bg-gray-100 rounded-full h-1.5">
-                            <div
-                              className="bg-purple-500 h-1.5 rounded-full transition-all"
-                              style={{ width: `${Math.min(val, 100)}%` }}
-                            />
+                      {Object.entries(s.factors).map(([key, val]) => {
+                        const maxWeights = { department: 30, project: 40, recency: 20, skill: 10 };
+                        const max = maxWeights[key] || 100;
+                        const pct = Math.round((val / max) * 100);
+                        return (
+                          <div key={key} className="flex items-center gap-2">
+                            <span className="text-xs text-gray-500 w-24 truncate capitalize">
+                              {key.replace(/_/g, " ")}
+                            </span>
+                            <div className="flex-1 bg-gray-100 rounded-full h-1.5">
+                              <div
+                                className="bg-purple-500 h-1.5 rounded-full transition-all"
+                                style={{ width: `${Math.min(pct, 100)}%` }}
+                              />
+                            </div>
+                            <span className="text-xs font-medium text-gray-600 w-12 text-right">
+                              {val}/{max}
+                            </span>
                           </div>
-                          <span className="text-xs font-medium text-gray-600 w-8 text-right">
-                            {val}
-                          </span>
-                        </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   )}
 

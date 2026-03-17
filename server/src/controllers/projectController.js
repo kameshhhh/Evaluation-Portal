@@ -91,6 +91,58 @@ router.post("/", async (req, res, next) => {
 });
 
 // ============================================================
+// GET /api/projects/mine — List only the authenticated user's projects
+// ============================================================
+// Returns projects where the user is an active team member.
+// Scoped view for students and faculty — admins should use GET /.
+// MUST be defined BEFORE /:id to avoid route conflicts.
+// ============================================================
+router.get("/mine", async (req, res, next) => {
+  try {
+    // Resolve personId from auth middleware enrichment
+    const personId = req.user?.personId;
+
+    if (!personId) {
+      return res.status(400).json({
+        success: false,
+        error: "Your account does not have a linked person profile yet. Contact your department admin.",
+      });
+    }
+
+    // Extract filters from query string
+    const filters = {
+      academicYear: req.query.academicYear
+        ? parseInt(req.query.academicYear, 10)
+        : undefined,
+      semester: req.query.semester
+        ? parseInt(req.query.semester, 10)
+        : undefined,
+      status: req.query.status || undefined,
+    };
+
+    // Pagination
+    const pagination = {
+      limit: parseInt(req.query.limit, 10) || 50,
+      offset: parseInt(req.query.offset, 10) || 0,
+    };
+
+    const { projects, total } = await ProjectEntityService.listProjectsByMember(
+      personId,
+      filters,
+      pagination,
+    );
+
+    res.json({
+      success: true,
+      data: projects.map((p) => p.toJSON()),
+      pagination: { total, limit: pagination.limit, offset: pagination.offset },
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// ============================================================
 // GET /api/projects — List projects with filters
 // ============================================================
 router.get("/", async (req, res, next) => {

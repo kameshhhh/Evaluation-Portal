@@ -50,6 +50,7 @@ import ContributionGraph from "./github/ContributionGraph";
 
 import { getEnhancedMembers } from "../../services/projectEnhancementApi";
 import { getProject } from "../../services/projectService";
+import { useSocket, EVENTS } from "../../contexts/SocketContext";
 
 const TABS = [
   { key: "overview", label: "Overview", icon: LayoutDashboard },
@@ -71,6 +72,8 @@ const EnhancedProjectDashboard = () => {
   const [loadingMembers, setLoadingMembers] = useState(true);
   const [loadingProject, setLoadingProject] = useState(true);
   const [error, setError] = useState(null);
+  const [repoRefreshKey, setRepoRefreshKey] = useState(0);
+  const { socket } = useSocket();
 
   // Get current user from localStorage
   const user = JSON.parse(localStorage.getItem("user") || "{}");
@@ -106,6 +109,32 @@ const EnhancedProjectDashboard = () => {
     fetchProject();
     fetchMembers();
   }, [fetchProject, fetchMembers]);
+
+  // Join project socket room for real-time updates
+  useEffect(() => {
+    if (!socket || !projectId) return;
+    socket.emit("join:project", projectId);
+
+    const repoEvents = [
+      EVENTS.REPO_FILE_COMMITTED,
+      EVENTS.REPO_FILE_DELETED,
+      EVENTS.REPO_BRANCH_CREATED,
+      EVENTS.REPO_BRANCH_DELETED,
+      EVENTS.REPO_ISSUE_CREATED,
+      EVENTS.REPO_ISSUE_UPDATED,
+      EVENTS.REPO_PR_CREATED,
+      EVENTS.REPO_PR_UPDATED,
+      EVENTS.REPO_PR_COMMENTED,
+    ];
+
+    const handleRepoEvent = () => setRepoRefreshKey((k) => k + 1);
+    repoEvents.forEach((evt) => socket.on(evt, handleRepoEvent));
+
+    return () => {
+      socket.emit("leave:project", projectId);
+      repoEvents.forEach((evt) => socket.off(evt, handleRepoEvent));
+    };
+  }, [socket, projectId]);
 
   const renderTab = () => {
     switch (activeTab) {
@@ -172,7 +201,7 @@ const EnhancedProjectDashboard = () => {
 
             {/* Contribution Graph */}
             <section>
-              <ContributionGraph projectId={projectId} />
+              <ContributionGraph projectId={projectId} refreshKey={repoRefreshKey} />
             </section>
           </div>
         );
@@ -181,19 +210,19 @@ const EnhancedProjectDashboard = () => {
       case "code":
         return (
           <div className="space-y-6">
-            <RepositoryBrowser projectId={projectId} />
-            <CommitHistory projectId={projectId} />
-            <BranchManager projectId={projectId} />
+            <RepositoryBrowser projectId={projectId} refreshKey={repoRefreshKey} />
+            <CommitHistory projectId={projectId} refreshKey={repoRefreshKey} />
+            <BranchManager projectId={projectId} refreshKey={repoRefreshKey} />
           </div>
         );
 
       // ─────── ISSUES ───────
       case "issues":
-        return <IssueTracker projectId={projectId} />;
+        return <IssueTracker projectId={projectId} refreshKey={repoRefreshKey} />;
 
       // ─────── PULL REQUESTS ───────
       case "prs":
-        return <PullRequestPanel projectId={projectId} />;
+        return <PullRequestPanel projectId={projectId} refreshKey={repoRefreshKey} />;
 
       // ─────── WORK LOGS ───────
       case "worklogs":
@@ -244,7 +273,7 @@ const EnhancedProjectDashboard = () => {
 
       // ─────── ACTIVITY ───────
       case "activity":
-        return <ActivityFeed projectId={projectId} />;
+        return <ActivityFeed projectId={projectId} refreshKey={repoRefreshKey} />;
 
       // ─────── INSIGHTS (SRS 4.1.2 Improvement) ───────
       case "insights":

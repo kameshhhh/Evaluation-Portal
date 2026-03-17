@@ -6,7 +6,7 @@
  *
  * SCORING:
  *   Per rubric: weighted_avg = Σ(mark × cred_weight) / Σ(cred_weight)
- *   Display score = Σ(rubric_weighted_avg) / rubric_count  (always 0-5)
+ *   Display score = Σ(rubric_weighted_avg)  (always 0-5, rubrics are parts of a 5-point pool)
  *
  * CREDIBILITY PIPELINE:
  *   ① AlignmentAnalyzer — exp(-5·d) per rubric, averaged
@@ -91,10 +91,10 @@ class CredibilityService {
 
     // ─── CALCULATE STUDENT SCORE (PER-RUBRIC) ──────────────
     /**
-     * Computes credibility-weighted scores per rubric, then averages
+     * Computes credibility-weighted scores per rubric, then sums them
      * to produce display_score (always 0-5).
      *
-     * display_score = Σ(rubric_weighted_avg) / rubric_count
+     * display_score = Σ(rubric_weighted_avg)  — rubrics are parts of a 5-point pool
      */
     async calculateStudentScore(sessionId, studentId, snapshot = null, client = null) {
         const q = client ? (text, params) => client.query(text, params) : query;
@@ -165,6 +165,7 @@ class CredibilityService {
 
             for (const rubricId of rubricIds) {
                 let weightedSum = 0, totalWeight = 0, rawSum = 0, count = 0;
+                const judges = [];
 
                 for (const sub of submissions) {
                     const rm = this._safeParseRubricMarks(sub.rubric_marks);
@@ -175,6 +176,7 @@ class CredibilityService {
                     totalWeight += weight;
                     rawSum += mark;
                     count++;
+                    judges.push({ faculty_id: sub.faculty_id, mark, weight: +weight.toFixed(4) });
                 }
 
                 const weightedAvg = totalWeight > 0 ? (weightedSum / totalWeight) : 0;
@@ -187,13 +189,14 @@ class CredibilityService {
                     weighted_avg: +weightedAvg.toFixed(4),
                     raw_avg: +rawAvg.toFixed(4),
                     judge_count: count,
+                    judges,
                 };
 
                 totalWeightedSum += weightedAvg;
             }
 
-            // display_score = avg of weighted per-rubric scores → already 0-5
-            const displayScore = rubricCount > 0 ? (totalWeightedSum / rubricCount) : 0;
+            // display_score = sum of per-rubric weighted averages (rubrics are parts of a 5-point pool)
+            const displayScore = totalWeightedSum;
 
             // Legacy: compute total-based scores for backward compat
             let legacyWeightedSum = 0, legacyTotalWeight = 0, rawTotal = 0;
@@ -336,6 +339,7 @@ class CredibilityService {
 
             for (const rubricId of rubricIdsArr) {
                 let weightedSum = 0, totalWeight = 0, rawSum = 0, count = 0;
+                const judges = [];
 
                 for (const sub of submissions) {
                     const rm = this._safeParseRubricMarks(sub.rubric_marks);
@@ -346,6 +350,7 @@ class CredibilityService {
                     totalWeight += weight;
                     rawSum += mark;
                     count++;
+                    judges.push({ faculty_id: sub.faculty_id, mark, weight: +weight.toFixed(4) });
                 }
 
                 const weightedAvg = totalWeight > 0 ? (weightedSum / totalWeight) : 0;
@@ -357,11 +362,13 @@ class CredibilityService {
                     weighted_avg: +weightedAvg.toFixed(4),
                     raw_avg: +rawAvg.toFixed(4),
                     judge_count: count,
+                    judges,
                 };
                 totalWeightedSum += weightedAvg;
             }
 
-            const displayScore = rubricCount > 0 ? (totalWeightedSum / rubricCount) : 0;
+            // display_score = sum of per-rubric weighted averages (rubrics are parts of a 5-point pool)
+            const displayScore = totalWeightedSum;
 
             // Legacy total-based scores (backward compat)
             let legacyWeightedSum = 0, legacyTotalWeight = 0, rawTotal = 0;
@@ -470,8 +477,9 @@ class CredibilityService {
                 [sessionId]
             );
             if (!lockRes.rows[0]) throw new Error("Session not found");
-            if (lockRes.rows[0].status === 'FINALIZED') {
-                throw new Error("Session is already finalized");
+            const isRefinalize = lockRes.rows[0].status === 'FINALIZED';
+            if (isRefinalize) {
+                logger.info("CredibilityService: Re-finalizing already-finalized session", { sessionId });
             }
 
             // Step 1: Freeze Credibility Snapshot
@@ -511,7 +519,25 @@ class CredibilityService {
             }
 
             const rubricCount = rubricIds.length || 1;
-            const scaleMax = rubricCount * 5;
+            const scaleMax = 5; // Each student's total pool is always 5
+
+            // Compute per-rubric pools for alignment normalization
+            // (matches submission pool logic: sorted by name, remainder to first rubrics)
+            const rubricPoolMap = {};
+            if (rubricIds.length > 0) {
+                const rubricNamesRes = await client.query(
+                    `SELECT head_id, head_name FROM evaluation_heads WHERE head_id = ANY($1::uuid[]) ORDER BY head_name ASC`,
+                    [rubricIds]
+                );
+                const orderedIds = rubricNamesRes.rows.length > 0
+                    ? rubricNamesRes.rows.map(r => r.head_id)
+                    : rubricIds;
+                const basePool = Math.floor(scaleMax / rubricCount);
+                const poolRem = scaleMax % rubricCount;
+                orderedIds.forEach((rid, idx) => {
+                    rubricPoolMap[rid] = basePool + (idx < poolRem ? 1 : 0);
+                });
+            }
 
             // ── First-session detection (Fix #2: Fairness Protection) ──
             const isFirstSession = Object.values(snapshot).every(c => c === 1.0);
@@ -605,7 +631,7 @@ class CredibilityService {
                         const alignment = AlignmentAnalyzer.analyze({
                             evaluatorAllocations: rubricAllocs,
                             aggregatedMeans: rubricConsensus,
-                            poolSize: 5,
+                            poolSize: rubricPoolMap[rid] || Math.ceil(scaleMax / rubricCount),
                             targetCount: studentResults.length,
                         });
                         alignmentScoreSum += alignment.score;
@@ -640,11 +666,14 @@ class CredibilityService {
                     participationCount = existing.participation_count || 0;
                     oldProfileScore = parseFloat(existing.credibility_score);
                     const history = existing.history || [];
-                    const pastAlignments = history.map(h => h.alignment_score).filter(a => a != null && !isNaN(a));
+                    // On re-finalize: exclude old entries for THIS session to avoid double-counting
+                    const filteredHistory = isRefinalize
+                        ? history.filter(h => h.sessionId !== sessionId)
+                        : history;
+                    const pastAlignments = filteredHistory.map(h => h.alignment_score).filter(a => a != null && !isNaN(a));
                     if (pastAlignments.length >= 1) {
-                        const allAlignments = [...pastAlignments, alignmentScore];
-                        const mean = allAlignments.reduce((a, b) => a + b, 0) / allAlignments.length;
-                        const variance = allAlignments.reduce((s, v) => s + Math.pow(v - mean, 2), 0) / allAlignments.length;
+                        const mean = pastAlignments.reduce((a, b) => a + b, 0) / pastAlignments.length;
+                        const variance = pastAlignments.reduce((s, v) => s + Math.pow(v - mean, 2), 0) / pastAlignments.length;
                         stabilityScore = Math.max(0.1, 1 - Math.tanh(3 * Math.sqrt(variance)));
                     }
                 }
@@ -666,7 +695,7 @@ class CredibilityService {
                     const giniDenom = n * sorted.reduce((a, b) => a + b, 0);
                     const gini = giniDenom > 0 ? giniNum / giniDenom : 0;
                     const markRange = Math.max(...allMarks) - Math.min(...allMarks);
-                    const utilization = Math.min(1, markRange / 2.5);
+                    const utilization = Math.min(1, markRange / 5);
                     const markMean = allMarks.reduce((a, b) => a + b, 0) / n;
                     const markVar = allMarks.reduce((s, v) => s + Math.pow(v - markMean, 2), 0) / n;
                     const markCV = markMean > 0 ? Math.sqrt(markVar) / markMean : 0;
@@ -686,7 +715,7 @@ class CredibilityService {
 
                 // ⑤ TEMPORAL SMOOTHER
                 const smoothedProfileInput = oldProfileScore != null
-                    ? Math.max(0.1, Math.min(0.95, oldProfileScore / 2.0))
+                    ? Math.max(0.1, Math.min(0.95, oldProfileScore))
                     : 0.5;
                 const smoothed = TemporalSmoother.smooth({
                     currentProfile: smoothedProfileInput,
@@ -694,12 +723,9 @@ class CredibilityService {
                     sessionCount: participationCount + 1,
                 });
 
-                const newCred = Math.max(0.1, Math.min(2.0, smoothed.smoothed_score * 2.0));
-
-                // Display score: 0.00 - 1.00 (decimal, NOT percentage)
-                const displayScoreDecimal = Math.max(0, Math.min(1.0,
-                    (composited.composite_score - 0.1) / 0.85
-                ));
+                // credibility_score is now 0-1 (same as smoothed_score)
+                const newCred = smoothed.smoothed_score;
+                const displayScoreDecimal = newCred;
 
                 const historyEntry = {
                     sessionId, timestamp: new Date().toISOString(),
@@ -730,16 +756,29 @@ class CredibilityService {
                      VALUES ($1, $2, $3, 1, NOW(), $4::jsonb, $5, $6, $7, $8, $9)
                      ON CONFLICT (evaluator_id) DO UPDATE SET
                         credibility_score = $2, deviation_index = $3,
-                        participation_count = judge_credibility_metrics.participation_count + 1,
+                        participation_count = CASE
+                          WHEN $10 THEN judge_credibility_metrics.participation_count
+                          ELSE judge_credibility_metrics.participation_count + 1
+                        END,
                         last_updated = NOW(),
-                        history = COALESCE(judge_credibility_metrics.history, '[]'::jsonb) || $4::jsonb,
+                        history = CASE
+                          WHEN $10 THEN (
+                            SELECT COALESCE(jsonb_agg(elem), '[]'::jsonb)
+                            FROM jsonb_array_elements(
+                              COALESCE(judge_credibility_metrics.history, '[]'::jsonb)
+                            ) AS elem
+                            WHERE elem->>'sessionId' != $11
+                          ) || $4::jsonb
+                          ELSE COALESCE(judge_credibility_metrics.history, '[]'::jsonb) || $4::jsonb
+                        END,
                         display_score = $5, alignment_score = $6,
                         stability_score = $7, discipline_score = $8,
                         credibility_band = $9`,
                     [facultyId, newCred, finalDeviation,
                      JSON.stringify([historyEntry]),
                      displayScoreDecimal, alignmentScore,
-                     stabilityScore, disciplineScore, smoothed.band]
+                     stabilityScore, disciplineScore, smoothed.band,
+                     isRefinalize, sessionId]
                 );
 
                 judgesUpdated[facultyId] = {
@@ -755,31 +794,15 @@ class CredibilityService {
                 };
             }
 
-            // ── First-Session Two-Pass Protection (Fix #2) ──────────────
-            // After computing faculty credibility in Step 3, re-score students
-            // using the freshly computed weights so even Session 1 is fair.
-            // Pass 1 used raw averages (all cred=1.0). Pass 2 uses real alignment.
-            if (isFirstSession && Object.keys(judgesUpdated).length > 0) {
-                const freshSnapshot = { ...snapshot }; // Start with original
-                for (const [fid, data] of Object.entries(judgesUpdated)) {
-                    freshSnapshot[fid] = data.mapped;
-                }
-                logger.info("CredibilityService: Two-pass rescoring with fresh credibility", {
+            // ── First-Session: Keep Raw Averages ──────────────────────
+            // When all judges start at cred=1.0, student scores from Pass 1
+            // are already raw averages (fair). We do NOT re-score with the
+            // freshly computed credibility — those weights are saved in
+            // judge_credibility_metrics for use in the NEXT session only.
+            if (isFirstSession) {
+                logger.info("CredibilityService: First session — keeping raw averages for students, judge credibility saved for next session", {
                     sessionId,
-                    facultyCount: Object.keys(freshSnapshot).length,
-                    sample: Object.fromEntries(
-                        Object.entries(judgesUpdated).slice(0, 3).map(([k, v]) => [k, v.mapped])
-                    ),
-                });
-                studentResults = await this._batchCalculateStudentScores(sessionId, freshSnapshot, client);
-                if (studentResults.length > 0) {
-                    await client.query(
-                        `UPDATE final_student_results SET scale_max = $1 WHERE session_id = $2`,
-                        [scaleMax, sessionId]
-                    );
-                }
-                logger.info("CredibilityService: First-session protection complete", {
-                    sessionId, studentsRescored: studentResults.length,
+                    judgesUpdated: Object.keys(judgesUpdated).length,
                 });
             }
 

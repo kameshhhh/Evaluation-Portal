@@ -1037,12 +1037,10 @@ class PersonalizationService {
           fes.closes_at as deadline,
           fes.status as session_status,
           fsr.normalized_score,
+          fsr.display_score,
           fsr.confidence_score,
           fsr.finalized_at,
-          -- scale_max = rubric_count × 5  (fallback to 5 for no-rubric sessions)
-          GREATEST(
-            COALESCE(jsonb_array_length(fes.preferred_rubric_ids), 0), 1
-          ) * 5 AS scale_max
+          5 AS scale_max
         FROM session_planner_assignments spa
         JOIN faculty_evaluation_sessions fes ON fes.id = spa.session_id
         LEFT JOIN final_student_results fsr ON fsr.session_id = fes.id AND fsr.student_id = spa.student_id

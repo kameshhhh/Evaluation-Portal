@@ -42,6 +42,8 @@ import {
   FileText, // Session report tab icon
   Bell, // Alerts tab icon
   Settings, // Admin management tab icon
+  Clock, // Logs tab icon
+  Scale, // Comparative Review tab icon
 } from "lucide-react";
 
 // Import admin sub-components
@@ -57,6 +59,8 @@ import RubricManagementTab from "./admin/RubricManagementTab";
 import SessionReportTab from "./admin/SessionReportTab";
 import AlertsAppealsTab from "./admin/AlertsAppealsTab";
 import AdminManagementTab from "./admin/AdminManagementTab";
+import LogsTab from "./admin/LogsTab";
+import ComparativeReviewTab from "./admin/ComparativeReviewTab";
 
 // ============================================================
 // TAB CONFIGURATION — Defines the admin navigation tabs
@@ -134,6 +138,18 @@ const ADMIN_TABS = [
     label: "Management",
     icon: Settings,
     description: "Delete sessions & reset credibility",
+  },
+  {
+    id: "logs",
+    label: "Logs",
+    icon: Clock,
+    description: "Student work logs & session logs",
+  },
+  {
+    id: "comparative-review",
+    label: "Comp. Review",
+    icon: Scale,
+    description: "Head-to-head team comparison",
   },
 ];
 
@@ -279,6 +295,12 @@ const AdminDashboard = ({ data, onRefresh }) => {
 
           {/* Admin Management tab — delete sessions + reset credibility */}
           {activeTab === "management" && <AdminManagementTab />}
+
+          {/* Logs tab — student work logs & session logs */}
+          {activeTab === "logs" && <LogsTab />}
+
+          {/* Comparative Review tab — head-to-head team comparison */}
+          {activeTab === "comparative-review" && <ComparativeReviewTab />}
         </div>
       </main>
     </div>

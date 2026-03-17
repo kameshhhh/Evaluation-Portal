@@ -17,6 +17,7 @@ import {
   ClipboardList,
   BarChart3,
   FlaskConical,
+  Clock,
 } from "lucide-react";
 import useAuth from "../../hooks/useAuth";
 import { getInitials } from "../../utils/helpers";
@@ -106,6 +107,25 @@ const Navbar = () => {
                 >
                   <FolderOpen className="h-4 w-4" />
                   Projects
+                </button>
+              )}
+
+              {/* Work Log link — visible to students and faculty */}
+              {(user?.role === "student" || user?.role === "faculty") && (
+                <button
+                  onClick={() => navigate("/worklog")}
+                  className={`
+                    flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-medium
+                    transition-all duration-200
+                    ${
+                      isActive("/worklog")
+                        ? "text-[#7C3AED] bg-[#F5F3FF]"
+                        : "text-gray-500 hover:text-gray-700 hover:bg-[#F5F3FF]"
+                    }
+                  `}
+                >
+                  <Clock className="h-4 w-4" />
+                  WorkLog
                 </button>
               )}
 

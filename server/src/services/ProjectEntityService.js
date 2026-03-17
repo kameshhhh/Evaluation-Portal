@@ -404,6 +404,19 @@ class ProjectEntityService {
   }
 
   /**
+   * List projects where a specific person is an active team member.
+   * Used for scoped project views (students/faculty see only their projects).
+   *
+   * @param {string} personId - PEMM person UUID
+   * @param {Object} filters - { academicYear, semester, status }
+   * @param {Object} pagination - { limit, offset }
+   * @returns {Promise<{ projects: Array, total: number }>}
+   */
+  static async listProjectsByMember(personId, filters = {}, pagination = {}) {
+    return ProjectRepository.listByMember(personId, filters, pagination);
+  }
+
+  /**
    * Get the full transition history (audit trail) for a project.
    *
    * @param {string} projectId - UUID

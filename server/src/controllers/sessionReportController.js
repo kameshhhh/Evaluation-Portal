@@ -110,7 +110,8 @@ const getSessionReport = async (req, res) => {
     const sessionResult = await query(
       `SELECT id AS session_id, title, status, academic_year, semester,
               session_date, opens_at, closes_at, evaluation_mode,
-              preferred_rubric_ids, min_judges, finalized_at, batch_year
+              preferred_rubric_ids, min_judges, finalized_at, batch_year,
+              credibility_snapshot
        FROM faculty_evaluation_sessions
        WHERE id = $1`,
       [sessionId]
@@ -209,9 +210,17 @@ const getSessionReport = async (req, res) => {
 
     // ----------------------------------------------------------
     // 6. Faculty credibility scores
+    //    Prefer the snapshot (what was actually used to weight marks)
+    //    over the live value (which may have changed in later sessions).
     // ----------------------------------------------------------
+    const snapshot = session.credibility_snapshot
+      ? (typeof session.credibility_snapshot === 'string'
+          ? JSON.parse(session.credibility_snapshot)
+          : session.credibility_snapshot)
+      : null;
+
     const credibilityResult = await query(
-      `SELECT evaluator_id, credibility_score, credibility_band
+      `SELECT evaluator_id, credibility_score, display_score, credibility_band
        FROM judge_credibility_metrics
        WHERE evaluator_id IN (
          SELECT DISTINCT faculty_id FROM session_planner_assignments
@@ -221,8 +230,10 @@ const getSessionReport = async (req, res) => {
     );
     const credibilityMap = {};
     credibilityResult.rows.forEach((r) => {
+      // snapshot and credibility_score are both 0-1 now
+      const snapshotScore = snapshot ? parseFloat(snapshot[r.evaluator_id]) : null;
       credibilityMap[r.evaluator_id] = {
-        compositeScore: parseFloat(r.credibility_score) || 0,
+        compositeScore: snapshotScore != null ? snapshotScore : (parseFloat(r.credibility_score) || 0),
         band: r.credibility_band || "NEW",
       };
     });

@@ -771,9 +771,7 @@ const getMyResults = async (req, res) => {
         COALESCE(VARIANCE(spa.marks), 0) AS variance,
         COUNT(CASE WHEN spa.marks IS NOT NULL THEN 1 END) AS marks_count,
         COUNT(spa.id) AS total_assignments,
-        GREATEST(
-          COALESCE(jsonb_array_length(fes.preferred_rubric_ids), 0), 1
-        ) * 5 AS scale_max
+        5 AS scale_max
       FROM session_planner_assignments spa
       JOIN faculty_evaluation_sessions fes ON fes.id = spa.session_id
       WHERE spa.student_id = $1

@@ -11,10 +11,11 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import {
-    ArrowLeft, Users, Calendar, Clock, MapPin,
+    ArrowLeft, Users, User, Calendar, Clock, MapPin,
     Loader2, Star, Award, Check, CheckSquare, Square,
     AlertCircle, MessageSquare, Send, ChevronDown, ChevronUp,
     Mail, ClipboardList, RefreshCw, Plus, Minus,
+    Github, Video, ExternalLink, Link2,
 } from "lucide-react";
 import useAuth from "../../hooks/useAuth";
 import { useDataChange } from "../../hooks/useSocketEvent";
@@ -22,6 +23,7 @@ import {
     getMySessions,
     submitMarks as submitMarksApi,
     setSchedule as setScheduleApi,
+    setMeetLink as setMeetLinkApi,
 } from "../../services/sessionPlannerApi";
 import { listRubrics } from "../../services/rubricApi";
 
@@ -85,11 +87,11 @@ const groupStudentsByTeam = (students) => {
     return groups;
 };
 
-// Compute per-rubric pool limits for a team/individual evaluation group
-// Matches backend logic: pool = teamSize × 5, floor + remainder (alphabetical by rubric name)
+// Compute per-rubric pool limits — always 5 per student, split across rubrics
+// Teams are for UI grouping only; each student has independent 5-point pool
 const computeRubricPools = (teamSize, rubrics) => {
     if (!rubrics || rubrics.length === 0) return {};
-    const totalPool = teamSize * 5;
+    const totalPool = 5; // Always 5 per student regardless of team size
     const count = rubrics.length;
     const base = Math.floor(totalPool / count);
     const rem = totalPool - base * count;
@@ -100,21 +102,6 @@ const computeRubricPools = (teamSize, rubrics) => {
         pools[r.headId] = base + (idx < rem ? 1 : 0);
     });
     return pools;
-};
-
-// Get used marks per rubric across a team (excluding current student)
-const getUsedPerRubric = (teamStudents, currentStudentId, rubricIds) => {
-    const used = {};
-    rubricIds.forEach(rid => { used[rid] = 0; });
-    for (const s of teamStudents) {
-        if (s.student_id === currentStudentId) continue;
-        if (!s.marks_submitted_at || !s.rubric_marks) continue;
-        const rm = typeof s.rubric_marks === 'string' ? JSON.parse(s.rubric_marks) : s.rubric_marks;
-        for (const [rid, val] of Object.entries(rm)) {
-            used[rid] = (used[rid] || 0) + Number(val);
-        }
-    }
-    return used;
 };
 
 // ============================================================
@@ -325,7 +312,7 @@ const SessionDetailPage = () => {
     // ── Computed values ──
     const students = session.students || [];
     const rubricCount = rubricData.length || 1;
-    // Per-team: pool = team_size × 5, per-rubric: floor(pool/rubricCount) + remainder
+    // Pool = 5 per student, split across rubrics: floor(5/rubricCount) + remainder
     const submittedCount = students.filter(s => s.marks_submitted_at).length;
     const groups = groupStudentsByTeam(students);
     const weekRange = getWeekRange(session);
@@ -625,26 +612,38 @@ const SessionDetailPage = () => {
                                 <div key={group.team_id || `no-team-${gIdx}`}>
                                     {/* Team header */}
                                     {group.team_title && (
-                                        <div className="flex items-center gap-2 mb-2">
-                                            <div className="h-px flex-1 bg-violet-100" />
-                                            <span className="text-[11px] font-bold text-violet-600 flex items-center gap-1 px-3 py-1 bg-violet-50 rounded-full border border-violet-100">
-                                                <Users size={11} /> {group.team_title}
-                                                {group.team_leader_name && (
-                                                    <span className="text-violet-400 font-normal ml-1">· Lead: {group.team_leader_name}</span>
-                                                )}
-                                            </span>
-                                            <div className="h-px flex-1 bg-violet-100" />
+                                        <div className="bg-gradient-to-r from-violet-50 to-indigo-50 rounded-xl border border-violet-200/60 p-3 mb-2">
+                                            <div className="flex items-center justify-between">
+                                                <div className="flex items-center gap-2">
+                                                    <div className="w-7 h-7 rounded-lg bg-violet-500 flex items-center justify-center">
+                                                        <Users size={14} className="text-white" />
+                                                    </div>
+                                                    <div>
+                                                        <p className="text-xs font-bold text-violet-800">{group.team_title}</p>
+                                                        {group.team_leader_name && (
+                                                            <p className="text-[10px] text-violet-500">Lead: {group.team_leader_name}</p>
+                                                        )}
+                                                    </div>
+                                                </div>
+                                                <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-violet-100 text-violet-600 border border-violet-200">
+                                                    Team of {group.students.length}
+                                                </span>
+                                            </div>
                                         </div>
                                     )}
-                                    {!group.team_title && groups.length > 1 && group.students.length > 0 && (
-                                        <div className="flex items-center gap-2 mb-2 mt-4">
-                                            <div className="h-px flex-1 bg-gray-100" />
-                                            <span className="text-[11px] font-medium text-gray-400 px-2">Individual Students</span>
-                                            <div className="h-px flex-1 bg-gray-100" />
+                                    {!group.team_title && groups.some(g => g.team_title) && group.students.length > 0 &&
+                                     gIdx === groups.findIndex(g => !g.team_title) && (
+                                        <div className="bg-gradient-to-r from-gray-50 to-slate-50 rounded-xl border border-gray-200/60 p-3 mb-2 mt-4">
+                                            <div className="flex items-center gap-2">
+                                                <div className="w-7 h-7 rounded-lg bg-gray-400 flex items-center justify-center">
+                                                    <User size={14} className="text-white" />
+                                                </div>
+                                                <p className="text-xs font-bold text-gray-600">Individual Students</p>
+                                            </div>
                                         </div>
                                     )}
 
-                                    <div className="space-y-2">
+                                    <div className={`space-y-2 ${group.team_title ? 'ml-2 pl-3 border-l-2 border-violet-200/60' : ''}`}>
                                         {group.students.map((student) => {
                                             const isExpanded = expandedStudent === student.assignment_id;
                                             const yearLabel = getYearLabel(student.admission_year);
@@ -690,6 +689,15 @@ const SessionDetailPage = () => {
                                                                 )}
                                                                 {yearLabel && <span className="text-[10px] text-gray-500 font-medium">{yearLabel}</span>}
                                                                 {student.department_code && <span className="text-[10px] text-gray-400 uppercase">{student.department_code}</span>}
+                                                                {student.has_github_token && (
+                                                                    <button
+                                                                        onClick={(e) => { e.stopPropagation(); navigate(`/github/${student.student_id}`); }}
+                                                                        className="inline-flex items-center gap-0.5 text-[9px] text-gray-600 font-medium hover:text-gray-900 transition-colors cursor-pointer"
+                                                                        title={`View GitHub — @${student.github_username || 'Profile'}`}
+                                                                    >
+                                                                        <Github size={10} />
+                                                                    </button>
+                                                                )}
                                                             </div>
                                                         </div>
 
@@ -740,6 +748,32 @@ const SessionDetailPage = () => {
                                                                 </div>
                                                             )}
 
+                                                            {/* GitHub Profile Access */}
+                                                            <div className="flex items-center gap-2">
+                                                                {student.has_github_token ? (
+                                                                    <button
+                                                                        onClick={(e) => { e.stopPropagation(); navigate(`/github/${student.student_id}`); }}
+                                                                        className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-gray-700 bg-gray-50 hover:bg-gray-100 rounded-lg border border-gray-200 transition-colors"
+                                                                    >
+                                                                        <Github size={13} />
+                                                                        @{student.github_username || "View GitHub"}
+                                                                        <ExternalLink size={10} className="text-gray-400" />
+                                                                    </button>
+                                                                ) : (
+                                                                    <span className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs text-gray-400 bg-gray-50 rounded-lg border border-dashed border-gray-200">
+                                                                        <Github size={13} />
+                                                                        GitHub not linked
+                                                                    </span>
+                                                                )}
+                                                            </div>
+
+                                                            {/* Meet Link — Send/Edit */}
+                                                            <MeetLinkInput
+                                                                sessionId={sessionId}
+                                                                studentId={student.student_id}
+                                                                currentLink={student.meet_link}
+                                                            />
+
                                                             {/* Schedule details */}
                                                             {hasSchedule && (
                                                                 <div className="flex items-center gap-2 flex-wrap">
@@ -784,10 +818,7 @@ const SessionDetailPage = () => {
                                                             {isSubmitted ? (
                                                                 <div className="bg-green-50 rounded-xl p-4 border border-green-100 space-y-2">
                                                                     {(() => {
-                                                                        const evalGroup = groups.find(g => g.students.some(s => s.student_id === student.student_id));
-                                                                        const teamSize = evalGroup ? evalGroup.students.length : 1;
-                                                                        const totalPool = teamSize * 5;
-                                                                        const poolLimits = computeRubricPools(teamSize, rubricData);
+                                                                        const poolLimits = computeRubricPools(1, rubricData);
                                                                         return (
                                                                     <>
                                                                     <div className="flex items-center justify-between">
@@ -796,7 +827,7 @@ const SessionDetailPage = () => {
                                                                         </span>
                                                                         <span className="text-lg font-bold text-green-700">
                                                                             {student.marks}
-                                                                            <span className="text-xs font-normal text-gray-400 ml-1">/ {totalPool}</span>
+                                                                            <span className="text-xs font-normal text-gray-400 ml-1">/ 5</span>
                                                                         </span>
                                                                     </div>
                                                                     {/* Rubric breakdown if available */}
@@ -808,7 +839,7 @@ const SessionDetailPage = () => {
                                                                             <div className="mt-2 pt-2 border-t border-green-100 space-y-1">
                                                                                 {Object.entries(rm).map(([rid, val]) => {
                                                                                     const rubric = rubricData.find(r => r.headId === rid);
-                                                                                    const rubricPool = poolLimits[rid] || Math.floor(totalPool / (rubricData.length || 1));
+                                                                                    const rubricPool = poolLimits[rid] || Math.floor(5 / (rubricData.length || 1));
                                                                                     return (
                                                                                         <div key={rid} className="flex justify-between text-xs">
                                                                                             <span className="text-green-700">{rubric?.headName || rid}</span>
@@ -842,13 +873,8 @@ const SessionDetailPage = () => {
 
                                                                     {/* Rubric steppers */}
                                                                     {(() => {
-                                                                        // Compute pool limits for this evaluation group
-                                                                        const evalGroup = groups.find(g => g.students.some(s => s.student_id === student.student_id));
-                                                                        const teamStudents = evalGroup ? evalGroup.students : [student];
-                                                                        const teamSize = teamStudents.length;
-                                                                        const poolLimits = computeRubricPools(teamSize, rubricData);
-                                                                        const rubricIds = rubricData.map(r => r.headId);
-                                                                        const usedMarks = getUsedPerRubric(teamStudents, student.student_id, rubricIds);
+                                                                        // Pool is always 5 per student — teams are UI grouping only
+                                                                        const poolLimits = computeRubricPools(1, rubricData);
 
                                                                         return (
                                                                     <div className="space-y-2.5">
@@ -856,9 +882,7 @@ const SessionDetailPage = () => {
                                                                             const sid = student.student_id;
                                                                             const currentVal = rubricMarksInputs[sid]?.[rubric.headId] ?? 0;
                                                                             const poolForRubric = poolLimits[rubric.headId] || 5;
-                                                                            const usedByOthers = usedMarks[rubric.headId] || 0;
-                                                                            const remaining = poolForRubric - usedByOthers;
-                                                                            const maxForThis = Math.max(0, Math.min(5, remaining));
+                                                                            const maxForThis = poolForRubric;
                                                                             const isZero = currentVal === 0 && (rubricMarksInputs[sid]?.[rubric.headId] !== undefined);
                                                                             const zfText = zeroFeedbackInputs[sid]?.[rubric.headId] || "";
 
@@ -923,10 +947,8 @@ const SessionDetailPage = () => {
                                                                         const sid = student.student_id;
                                                                         const marks = rubricMarksInputs[sid] || {};
                                                                         const total = Object.values(marks).reduce((s, v) => s + v, 0);
-                                                                        const avg = rubricData.length > 0 ? (total / rubricData.length) : 0;
                                                                         const evalGroup = groups.find(g => g.students.some(s => s.student_id === student.student_id));
                                                                         const teamSize = evalGroup ? evalGroup.students.length : 1;
-                                                                        const totalPool = teamSize * 5;
                                                                         return (
                                                                             <>
                                                                             <div className="flex items-center justify-between px-3 py-2 bg-violet-100/50 rounded-lg">
@@ -934,15 +956,13 @@ const SessionDetailPage = () => {
                                                                                     Display Score
                                                                                 </span>
                                                                                 <span className="text-sm font-bold text-violet-800">
-                                                                                    {avg.toFixed(1)} / 5
+                                                                                    {total.toFixed(1)} / 5
                                                                                 </span>
                                                                             </div>
-                                                                            {teamSize > 0 && (
-                                                                                <div className="text-[10px] text-gray-400 text-right">
-                                                                                    Pool: {totalPool} points across {rubricData.length} rubric{rubricData.length !== 1 ? 's' : ''}
-                                                                                    {teamSize > 1 ? ` (team of ${teamSize})` : ' (individual)'}
-                                                                                </div>
-                                                                            )}
+                                                                            <div className="text-[10px] text-gray-400 text-right">
+                                                                                {rubricData.length} rubric{rubricData.length !== 1 ? 's' : ''} · Max 5 per student
+                                                                                {teamSize > 1 ? ` · Team of ${teamSize} (grouped for comparison)` : ''}
+                                                                            </div>
                                                                             </>
                                                                         );
                                                                     })()}
@@ -1019,6 +1039,83 @@ const SessionDetailPage = () => {
 
             {/* Inline keyframe */}
             <style>{`@keyframes fadeIn { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }`}</style>
+        </div>
+    );
+};
+
+// ============================================================
+// MEET LINK INPUT — Inline component for sending meet link
+// ============================================================
+const MeetLinkInput = ({ sessionId, studentId, currentLink }) => {
+    const [link, setLink] = useState(currentLink || "");
+    const [editing, setEditing] = useState(false);
+    const [saving, setSaving] = useState(false);
+    const [saved, setSaved] = useState(false);
+
+    useEffect(() => { setLink(currentLink || ""); }, [currentLink]);
+
+    const handleSave = async () => {
+        setSaving(true);
+        try {
+            await setMeetLinkApi(sessionId, studentId, link);
+            setSaved(true);
+            setEditing(false);
+            setTimeout(() => setSaved(false), 2000);
+        } catch { /* ignore */ }
+        finally { setSaving(false); }
+    };
+
+    if (currentLink && !editing) {
+        return (
+            <div className="flex items-center gap-2">
+                <a
+                    href={currentLink}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-blue-600 bg-blue-50 hover:bg-blue-100 rounded-lg border border-blue-200 transition-colors"
+                >
+                    <Video size={13} />
+                    Meet Link
+                    <ExternalLink size={10} />
+                </a>
+                <button
+                    onClick={() => setEditing(true)}
+                    className="text-[10px] text-gray-400 hover:text-gray-600 transition-colors"
+                >
+                    Edit
+                </button>
+                {saved && <span className="text-[10px] text-emerald-500 font-medium">Saved!</span>}
+            </div>
+        );
+    }
+
+    return (
+        <div className="flex items-center gap-2">
+            <div className="flex-1 flex items-center gap-1.5">
+                <Link2 size={13} className="text-gray-400 shrink-0" />
+                <input
+                    type="url"
+                    value={link}
+                    onChange={(e) => setLink(e.target.value)}
+                    placeholder="Paste meet link (Google Meet, Zoom...)"
+                    className="flex-1 px-2.5 py-1.5 text-xs bg-gray-50 border border-gray-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-violet-400 placeholder-gray-300"
+                    onKeyDown={(e) => e.key === "Enter" && handleSave()}
+                />
+            </div>
+            <button
+                onClick={handleSave}
+                disabled={saving || !link.trim()}
+                className="px-3 py-1.5 text-xs font-medium text-white bg-violet-500 hover:bg-violet-600 disabled:opacity-40 rounded-lg transition-colors flex items-center gap-1"
+            >
+                {saving ? <Loader2 size={10} className="animate-spin" /> : <Send size={10} />}
+                {saving ? "..." : "Send"}
+            </button>
+            {editing && (
+                <button onClick={() => { setEditing(false); setLink(currentLink || ""); }} className="text-[10px] text-gray-400 hover:text-gray-600">
+                    Cancel
+                </button>
+            )}
+            {saved && <span className="text-[10px] text-emerald-500 font-medium">Sent!</span>}
         </div>
     );
 };

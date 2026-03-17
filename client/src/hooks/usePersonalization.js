@@ -133,15 +133,20 @@ const usePersonalization = () => {
     try {
       // Invalidate the server-side cache first
       await invalidateDashboardCache();
-    } catch (err) {
+    } catch {
       // Cache invalidation failure is non-critical
-      console.warn("Cache invalidation failed:", err.message);
     }
 
     // Reset the loaded flag to show spinner on manual refresh
     hasLoadedOnce.current = false;
 
     // Trigger a re-fetch by incrementing the counter
+    setFetchTrigger((prev) => prev + 1);
+  }, []);
+
+  // Silent refresh — refetch data in the background without showing spinner
+  // Used by socket events so the dashboard doesn't unmount/remount
+  const silentRefresh = useCallback(() => {
     setFetchTrigger((prev) => prev + 1);
   }, []);
 
@@ -156,7 +161,7 @@ const usePersonalization = () => {
       "faculty_evaluation",
       "session_planner",
     ],
-    refresh,
+    silentRefresh,
   );
 
   // ---------------------------------------------------------

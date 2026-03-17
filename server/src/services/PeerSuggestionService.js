@@ -15,6 +15,14 @@
 
 const { query } = require("../config/database");
 const logger = require("../utils/logger");
+const { getCanonicalDepartment } = require("./personalization/academic/DepartmentRegistry");
+
+// Resolve department_code (e.g. "MZ") to full name (e.g. "Mechatronics Engineering")
+function resolveDeptName(code) {
+  if (!code) return null;
+  const dept = getCanonicalDepartment(code.toLowerCase());
+  return dept ? dept.name : code;
+}
 
 // Factor weights (out of 100 total)
 const FACTOR_WEIGHTS = {
@@ -126,7 +134,7 @@ class PeerSuggestionService {
       // Factor 1: Department match
       if (peer.department_code === student.department_code) {
         scores.department = FACTOR_WEIGHTS.department;
-        reasons.push(`Same department (${peer.department_code})`);
+        reasons.push(`Same department (${resolveDeptName(peer.department_code)})`);
       } else {
         scores.department = Math.round(FACTOR_WEIGHTS.department * 0.3);
         reasons.push(`Different department — adds diversity`);
@@ -180,16 +188,18 @@ class PeerSuggestionService {
         scores.department + scores.project + scores.recency + scores.skill;
 
       suggestions.push({
-        peerId: peer.person_id,
-        displayName: peer.display_name,
-        departmentCode: peer.department_code,
+        suggested_peer_id: peer.person_id,
+        peer_name: peer.display_name,
+        department: resolveDeptName(peer.department_code),
         admissionYear: peer.admission_year,
         departmentScore: scores.department,
         projectScore: scores.project,
         recencyScore: scores.recency,
         skillScore: scores.skill,
+        composite_score: totalScore,
         totalScore,
         reasons,
+        factors: scores,
       });
     }
 
@@ -231,11 +241,11 @@ class PeerSuggestionService {
     const result = await query(
       `SELECT DISTINCT ON (target_id)
         target_id,
-        EXTRACT(DAY FROM NOW() - created_at)::INTEGER AS days_since
+        EXTRACT(DAY FROM NOW() - sa.created_at)::INTEGER AS days_since
        FROM scarcity_allocations sa
        JOIN evaluation_sessions es ON sa.session_id = es.session_id
        WHERE sa.evaluator_id = $1
-       ORDER BY target_id, created_at DESC`,
+       ORDER BY target_id, sa.created_at DESC`,
       [studentId],
     );
 
@@ -283,22 +293,33 @@ class PeerSuggestionService {
    */
   static async _getCached(studentId, limit) {
     const result = await query(
-      `SELECT * FROM peer_suggestion_cache
-       WHERE student_id = $1
-         AND cached_at > NOW() - INTERVAL '6 hours'
-       ORDER BY total_score DESC
+      `SELECT psc.*, p.display_name, p.department_code
+       FROM peer_suggestion_cache psc
+       LEFT JOIN persons p ON p.person_id = psc.suggested_peer_id
+       WHERE psc.student_id = $1
+         AND psc.cached_at > NOW() - INTERVAL '6 hours'
+       ORDER BY psc.total_score DESC
        LIMIT $2`,
       [studentId, limit],
     );
 
     return result.rows.map((r) => ({
-      peerId: r.suggested_peer_id,
+      suggested_peer_id: r.suggested_peer_id,
+      peer_name: r.display_name || null,
+      department: resolveDeptName(r.department_code),
       departmentScore: r.department_score,
       projectScore: r.project_score,
       recencyScore: r.recency_score,
       skillScore: r.skill_score,
+      composite_score: r.total_score,
       totalScore: r.total_score,
       reasons: r.reasons || [],
+      factors: {
+        department: r.department_score,
+        project: r.project_score,
+        recency: r.recency_score,
+        skill: r.skill_score,
+      },
     }));
   }
 
@@ -329,7 +350,7 @@ class PeerSuggestionService {
           cached_at = NOW()`,
         [
           studentId,
-          s.peerId,
+          s.suggested_peer_id,
           s.departmentScore,
           s.projectScore,
           s.recencyScore,

@@ -29,6 +29,7 @@ const {
   listTeamFormations,
   approveTeam,
   rejectTeam,
+  deleteTeam,
   // Session planner
   verifyPlannerPassword,
   getPlannerOverview,
@@ -43,6 +44,7 @@ const {
   submitMarks,
   // Scheduling
   setSchedule,
+  setMeetLink,
   getStudentSchedules,
   getMySchedules,
   testAutoAssign,
@@ -106,6 +108,12 @@ router.post(
   authenticate,
   authorize("admin"),
   rejectTeam,
+);
+router.delete(
+  "/admin/teams/:formationId",
+  authenticate,
+  authorize("admin"),
+  deleteTeam,
 );
 
 // ============================================================
@@ -232,6 +240,14 @@ router.post(
   authenticate,
   authorize("admin", "faculty"),
   setSchedule,
+);
+
+// Faculty: send meet link to a specific student
+router.post(
+  "/planner/set-meet-link",
+  authenticate,
+  authorize("admin", "faculty"),
+  setMeetLink,
 );
 
 // Faculty/Admin: get all schedules for a student in a session (conflict view)

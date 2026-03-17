@@ -501,6 +501,65 @@ class ProjectRepository {
   }
 
   /**
+   * List projects where a specific person is an active team member.
+   * Returns projects the person belongs to, with optional filters.
+   * Used by GET /api/projects/mine for scoped project listing.
+   *
+   * @param {string} personId - UUID of the person (from persons table)
+   * @param {Object} filters - { academicYear, semester, status }
+   * @param {Object} pagination - { limit, offset }
+   * @returns {Promise<{ projects: Array<Project>, total: number }>}
+   */
+  static async listByMember(personId, filters = {}, pagination = { limit: 50, offset: 0 }) {
+    const conditions = ["p.is_deleted = false", "pm.left_at IS NULL", "pm.person_id = $1"];
+    const values = [personId];
+    let paramIndex = 2;
+
+    if (filters.academicYear) {
+      conditions.push(`p.academic_year = $${paramIndex++}`);
+      values.push(filters.academicYear);
+    }
+    if (filters.semester) {
+      conditions.push(`p.semester = $${paramIndex++}`);
+      values.push(filters.semester);
+    }
+    if (filters.status) {
+      conditions.push(`p.status = $${paramIndex++}`);
+      values.push(filters.status);
+    }
+
+    // Count total matching projects for this member
+    const countSql = `
+      SELECT COUNT(DISTINCT p.project_id) as total
+      FROM projects p
+      INNER JOIN project_members pm ON p.project_id = pm.project_id
+      WHERE ${conditions.join(" AND ")}
+    `;
+    const countResult = await query(countSql, values);
+    const total = parseInt(countResult.rows[0].total, 10);
+
+    // Fetch page
+    const limit = Math.min(pagination.limit || 50, 100);
+    const offset = pagination.offset || 0;
+    values.push(limit);
+    values.push(offset);
+
+    const sql = `
+      SELECT DISTINCT p.*
+      FROM projects p
+      INNER JOIN project_members pm ON p.project_id = pm.project_id
+      WHERE ${conditions.join(" AND ")}
+      ORDER BY p.created_at DESC
+      LIMIT $${paramIndex++} OFFSET $${paramIndex++}
+    `;
+
+    const result = await query(sql, values);
+    const projects = result.rows.map((row) => new Project(row));
+
+    return { projects, total };
+  }
+
+  /**
    * Get the state transition history for a project.
    * Useful for auditing and timeline display.
    *

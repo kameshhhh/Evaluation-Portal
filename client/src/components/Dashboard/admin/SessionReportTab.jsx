@@ -39,6 +39,8 @@ import {
 } from "../../../services/sessionReportApi";
 import { getYearLabel, YEAR_CHIPS, YEAR_BADGE_COLORS } from "../../../utils/yearUtils";
 import { getBatchYearLabel } from "../../../utils/batchHelper";
+import jsPDF from "jspdf";
+import autoTable from "jspdf-autotable";
 
 // ============================================================
 // MONTH NAMES — For month filter dropdown
@@ -101,18 +103,24 @@ const StatusBadge = ({ status }) => {
 // ============================================================
 const BandBadge = ({ band, score }) => {
   const colors = {
-    EXEMPLARY: "bg-emerald-100 text-emerald-700",
-    TRUSTED: "bg-blue-100 text-blue-700",
-    DEVELOPING: "bg-yellow-100 text-yellow-700",
-    PROBATION: "bg-orange-100 text-orange-700",
+    HIGH: "bg-emerald-100 text-emerald-700",
+    MEDIUM: "bg-yellow-100 text-yellow-700",
+    LOW: "bg-orange-100 text-orange-700",
     NEW: "bg-gray-100 text-gray-600",
+  };
+
+  const labels = {
+    HIGH: "Trusted",
+    MEDIUM: "Developing",
+    LOW: "Probation",
+    NEW: "New",
   };
 
   return (
     <span
       className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium ${colors[band] || colors.NEW}`}
     >
-      {band} {score != null ? `(${(score * 100).toFixed(0)}%)` : ""}
+      {labels[band] || band || "New"} {score != null ? `(${(score * 100).toFixed(0)}%)` : ""}
     </span>
   );
 };
@@ -142,7 +150,7 @@ const SessionReportTab = () => {
   const [deptFilter, setDeptFilter] = useState("");
   const [yearFilter, setYearFilter] = useState("all");
   const [statusFilters, setStatusFilters] = useState(new Set(["all"]));
-  const [rubricViewMode, setRubricViewMode] = useState("raw"); // "raw" | "weighted"
+  const [rubricViewMode, setRubricViewMode] = useState("weighted"); // "raw" | "weighted"
 
   // Pagination state
   const [currentPage, setCurrentPage] = useState(1);
@@ -350,6 +358,12 @@ const SessionReportTab = () => {
       return s ? Object.keys(s.rubricBreakdownRaw) : [];
     })();
 
+  // Faculty credibility lookup (for expanded row badges)
+  const facultyCredLookup = {};
+  (report?.faculty || []).forEach(f => {
+    facultyCredLookup[f.facultyId] = f.credibility;
+  });
+
   // ----------------------------------------------------------
   // CSV Export — mode: "raw" or "weighted"
   // ----------------------------------------------------------
@@ -399,7 +413,7 @@ const SessionReportTab = () => {
           if (isWeighted) return s.displayScore != null ? s.displayScore.toFixed(2) : "";
           if (!s.rubricBreakdownRaw) return "";
           const vals = sessionRubricIds.map(rid => s.rubricBreakdownRaw[rid]?.avg).filter(v => v != null);
-          return vals.length > 0 ? (vals.reduce((a, b) => a + b, 0) / vals.length).toFixed(2) : "";
+          return vals.length > 0 ? vals.reduce((a, b) => a + b, 0).toFixed(2) : "";
         })(),
         s.judgeCount || 0,
         s.confidenceScore != null
@@ -422,115 +436,106 @@ const SessionReportTab = () => {
   // PDF Export (print-based) — mode: "raw" or "weighted"
   // ----------------------------------------------------------
   const exportPDF = (mode = "raw") => {
-    if (!reportRef.current) return;
+    if (!report) return;
     const isWeighted = mode === "weighted";
     const label = isWeighted ? "Weighted (Credibility-Adjusted)" : "Raw Average";
-    const printWindow = window.open("", "_blank");
-    if (!printWindow) {
-      setError("Popup blocked — please allow popups for PDF export.");
-      return;
-    }
-    printWindow.document.write(`
-      <html>
-        <head>
-          <title>Session Report — ${report?.session?.title || ""} (${label})</title>
-          <style>
-            body { font-family: Arial, sans-serif; padding: 20px; font-size: 12px; }
-            h1 { font-size: 18px; margin-bottom: 4px; }
-            h2 { font-size: 14px; margin-top: 16px; color: #333; }
-            table { width: 100%; border-collapse: collapse; margin-top: 8px; }
-            th, td { border: 1px solid #ddd; padding: 6px 8px; text-align: left; font-size: 11px; }
-            th { background: #f5f5f5; font-weight: 600; }
-            .badge { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 10px; }
-            .evaluated { background: #dcfce7; color: #166534; }
-            .assigned { background: #fef9c3; color: #854d0e; }
-            .not_assigned { background: #fee2e2; color: #991b1b; }
-            .summary { display: flex; gap: 16px; margin: 12px 0; }
-            .card { border: 1px solid #e5e7eb; border-radius: 8px; padding: 12px 16px; min-width: 120px; }
-            .card-value { font-size: 22px; font-weight: 700; }
-            .card-label { font-size: 11px; color: #6b7280; }
-            @media print { body { -webkit-print-color-adjust: exact; } }
-          </style>
-        </head>
-        <body>
-          <h1>Session Report: ${report?.session?.title || ""}</h1>
-          <p>Academic Year: ${report?.session?.academic_year || ""} | Status: ${report?.session?.status || ""} | Rubric Mode: ${label} | Generated: ${new Date().toLocaleDateString()}</p>
-          
-          <div class="summary">
-            <div class="card"><div class="card-value">${report?.summary?.totalStudents || 0}</div><div class="card-label">Total Students</div></div>
-            <div class="card"><div class="card-value">${report?.summary?.totalFaculty || 0}</div><div class="card-label">Total Faculty</div></div>
-            <div class="card"><div class="card-value">${report?.summary?.evaluatedCount || 0}</div><div class="card-label">Evaluated</div></div>
-            <div class="card"><div class="card-value">${report?.summary?.notEvaluatedCount || 0}</div><div class="card-label">Not Evaluated</div></div>
-            <div class="card"><div class="card-value">${report?.summary?.notAssignedCount || 0}</div><div class="card-label">Not Assigned</div></div>
-          </div>
+    const pdf = new jsPDF("l", "mm", "a4"); // landscape for wide tables
+    const pageWidth = pdf.internal.pageSize.getWidth();
+    const margin = 14;
 
-          <h2>Students</h2>
-          <table>
-            <thead>
-              <tr>
-                <th>Name</th><th>Dept</th><th>Year</th><th>Status</th><th>Faculty</th>
-                ${sessionRubricIds.map((id) => `<th>${rubricMap[id] || id.slice(0, 8)}</th>`).join("")}
-                <th>Score</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${filteredStudents
-                .map(
-                  (s) => {
-                    return `
-                <tr>
-                  <td>${s.studentName}</td>
-                  <td>${s.department || "-"}</td>
-                  <td>${s.batchYear ? (getBatchYearLabel(s.batchYear) || '-') : (getYearLabel(s.admissionYear) || '-')}</td>
-                  <td><span class="badge ${s.status}">${s.status === "evaluated" ? "Evaluated" : s.status === "assigned" ? "Not Evaluated" : "Not Assigned"}</span></td>
-                  <td>${s.assignments?.map((a) => a.facultyName).join(", ") || "-"}</td>
-                  ${sessionRubricIds
-                    .map((rid) => {
-                      const bd = isWeighted ? s.rubricBreakdownFinal : s.rubricBreakdownRaw;
-                      const rb = bd?.[rid];
-                      return `<td>${rb?.avg != null ? rb.avg.toFixed(2) : "-"}</td>`;
-                    })
-                    .join("")}
-                  <td>${(() => {
-                    if (isWeighted) return s.displayScore != null ? s.displayScore.toFixed(2) : "-";
-                    if (!s.rubricBreakdownRaw) return "-";
-                    const vals = sessionRubricIds.map(rid => s.rubricBreakdownRaw[rid]?.avg).filter(v => v != null);
-                    return vals.length > 0 ? (vals.reduce((a, b) => a + b, 0) / vals.length).toFixed(2) : "-";
-                  })()}</td>
-                </tr>
-              `;
-                  }
-                )
-                .join("")}
-            </tbody>
-          </table>
+    // -- Title --
+    pdf.setFontSize(16);
+    pdf.setFont("helvetica", "bold");
+    pdf.text(`Session Report: ${report.session?.title || ""}`, margin, 18);
+    pdf.setFontSize(9);
+    pdf.setFont("helvetica", "normal");
+    pdf.text(
+      `Academic Year: ${report.session?.academic_year || ""} | Status: ${report.session?.status || ""} | Rubric Mode: ${label} | Generated: ${new Date().toLocaleDateString()}`,
+      margin, 25
+    );
 
-          <h2>Faculty</h2>
-          <table>
-            <thead><tr><th>Name</th><th>Dept</th><th>Assigned</th><th>Evaluated</th><th>Pending</th><th>Credibility</th></tr></thead>
-            <tbody>
-              ${filteredFaculty
-                .map(
-                  (f) => `
-                <tr>
-                  <td>${f.facultyName}</td>
-                  <td>${f.department || "-"}</td>
-                  <td>${f.assignedCount}</td>
-                  <td>${f.evaluatedCount}</td>
-                  <td>${f.pendingCount}</td>
-                  <td>${f.credibility?.band || "NEW"} (${((f.credibility?.compositeScore || 0) * 100).toFixed(0)}%)</td>
-                </tr>
-              `
-                )
-                .join("")}
-            </tbody>
-          </table>
-        </body>
-      </html>
-    `);
-    printWindow.document.close();
-    printWindow.focus();
-    setTimeout(() => printWindow.print(), 500);
+    // -- Summary row --
+    const sumY = 32;
+    const sumItems = [
+      ["Students", report.summary?.totalStudents || 0],
+      ["Faculty", report.summary?.totalFaculty || 0],
+      ["Evaluated", report.summary?.evaluatedCount || 0],
+      ["Not Evaluated", report.summary?.notEvaluatedCount || 0],
+      ["Not Assigned", report.summary?.notAssignedCount || 0],
+    ];
+    pdf.setFontSize(8);
+    sumItems.forEach(([lbl, val], i) => {
+      const x = margin + i * 42;
+      pdf.setFont("helvetica", "bold");
+      pdf.text(String(val), x, sumY);
+      pdf.setFont("helvetica", "normal");
+      pdf.text(lbl, x, sumY + 4);
+    });
+
+    // -- Students table --
+    const rubricNames = sessionRubricIds.map((id) => rubricMap[id] || id.slice(0, 8));
+    const studentHead = ["#", "Name", "Dept", "Year", "Status", "Faculty", ...rubricNames, "Score"];
+    const studentBody = filteredStudents.map((s, idx) => {
+      const yearLabel = s.batchYear ? (getBatchYearLabel(s.batchYear) || "-") : (getYearLabel(s.admissionYear) || "-");
+      const statusLabel = s.status === "evaluated" ? "Evaluated" : s.status === "assigned" ? "Not Evaluated" : "Not Assigned";
+      const faculty = s.assignments?.map((a) => a.facultyName).join(", ") || "-";
+      const rubricCells = sessionRubricIds.map((rid) => {
+        const bd = isWeighted ? s.rubricBreakdownFinal : s.rubricBreakdownRaw;
+        const rb = bd?.[rid];
+        return rb?.avg != null ? rb.avg.toFixed(2) : "-";
+      });
+      let score = "-";
+      if (isWeighted) {
+        score = s.displayScore != null ? s.displayScore.toFixed(2) : "-";
+      } else if (s.rubricBreakdownRaw) {
+        const vals = sessionRubricIds.map((rid) => s.rubricBreakdownRaw[rid]?.avg).filter((v) => v != null);
+        score = vals.length > 0 ? vals.reduce((a, b) => a + b, 0).toFixed(2) : "-";
+      }
+      return [idx + 1, s.studentName, s.department || "-", yearLabel, statusLabel, faculty, ...rubricCells, score];
+    });
+
+    autoTable(pdf, {
+      startY: sumY + 10,
+      head: [studentHead],
+      body: studentBody,
+      styles: { fontSize: 8, cellPadding: 2 },
+      headStyles: { fillColor: [79, 70, 229], textColor: 255, fontStyle: "bold", fontSize: 8 },
+      alternateRowStyles: { fillColor: [245, 245, 255] },
+      margin: { left: margin, right: margin },
+      theme: "grid",
+    });
+
+    // -- Faculty table --
+    const studTableEndY = pdf.lastAutoTable.finalY;
+    if (studTableEndY + 10 > pdf.internal.pageSize.getHeight() - 40) pdf.addPage();
+    pdf.setFontSize(12);
+    pdf.setFont("helvetica", "bold");
+    pdf.text("Faculty", margin, studTableEndY + 8);
+
+    const facHead = ["#", "Name", "Dept", "Assigned", "Evaluated", "Pending", "Credibility"];
+    const facBody = filteredFaculty.map((f, idx) => [
+      idx + 1,
+      f.facultyName,
+      f.department || "-",
+      f.assignedCount,
+      f.evaluatedCount,
+      f.pendingCount,
+      `${({ HIGH: "Trusted", MEDIUM: "Developing", LOW: "Probation" }[f.credibility?.band] || f.credibility?.band || "New")} (${((f.credibility?.compositeScore || 0) * 100).toFixed(0)}%)`,
+    ]);
+
+    autoTable(pdf, {
+      startY: studTableEndY + 12,
+      head: [facHead],
+      body: facBody,
+      styles: { fontSize: 8, cellPadding: 2 },
+      headStyles: { fillColor: [34, 197, 94], textColor: 255, fontStyle: "bold", fontSize: 8 },
+      alternateRowStyles: { fillColor: [240, 253, 244] },
+      margin: { left: margin, right: margin },
+      theme: "grid",
+    });
+
+    const fileName = `session-report-${label.toLowerCase().replace(/\s+/g, "-")}-${report.session?.title?.replace(/\s+/g, "_") || "export"}.pdf`;
+    pdf.save(fileName);
   };
 
   // ============================================================
@@ -897,6 +902,15 @@ const SessionReportTab = () => {
                     <Download className="h-3.5 w-3.5" />
                     CSV
                   </button>
+                  {/* PDF Download */}
+                  <button
+                    onClick={() => exportPDF(rubricViewMode)}
+                    className="flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-white bg-red-600 hover:bg-red-700 rounded-lg transition-colors"
+                    title="Download PDF"
+                  >
+                    <FileDown className="h-3.5 w-3.5" />
+                    PDF
+                  </button>
                 </div>
               </div>
 
@@ -1114,18 +1128,31 @@ const SessionReportTab = () => {
                           <td className="px-4 py-3 text-center">
                             {(() => {
                               if (rubricViewMode === "weighted") {
-                                return student.displayScore != null ? (
-                                  <span className="font-bold text-indigo-600">
-                                    {student.displayScore.toFixed(2)}
-                                  </span>
-                                ) : <span className="text-gray-300">-</span>;
+                                if (student.displayScore == null) return <span className="text-gray-300">-</span>;
+                                // Compute raw sum for delta comparison
+                                const rawSrc = student.rubricBreakdownRaw;
+                                const rawVals = rawSrc ? sessionRubricIds.map(rid => rawSrc[rid]?.avg).filter(v => v != null) : [];
+                                const rawSum = rawVals.length > 0 ? rawVals.reduce((a, b) => a + b, 0) : null;
+                                const delta = rawSum != null ? student.displayScore - rawSum : null;
+                                return (
+                                  <div className="flex flex-col items-center">
+                                    <span className="font-bold text-indigo-600">
+                                      {student.displayScore.toFixed(2)}
+                                    </span>
+                                    {delta != null && Math.abs(delta) >= 0.005 && (
+                                      <span className={`text-[9px] font-medium ${delta > 0 ? 'text-green-600' : 'text-red-500'}`}>
+                                        Δ {delta > 0 ? '+' : ''}{delta.toFixed(2)}
+                                      </span>
+                                    )}
+                                  </div>
+                                );
                               }
                               const src = student.rubricBreakdownRaw;
                               if (!src) return <span className="text-gray-300">-</span>;
                               const vals = sessionRubricIds.map(rid => src[rid]?.avg).filter(v => v != null);
                               if (vals.length === 0) return <span className="text-gray-300">-</span>;
-                              const rawAvg = vals.reduce((a, b) => a + b, 0) / vals.length;
-                              return <span className="font-bold text-emerald-600">{rawAvg.toFixed(2)}</span>;
+                              const rawSum = vals.reduce((a, b) => a + b, 0);
+                              return <span className="font-bold text-emerald-600">{rawSum.toFixed(2)}</span>;
                             })()}
                           </td>
                           <td className="px-4 py-3 text-center text-gray-600">
@@ -1175,7 +1202,16 @@ const SessionReportTab = () => {
                                           className="hover:bg-white"
                                         >
                                           <td className="px-3 py-2 font-medium text-gray-800">
-                                            {a.facultyName}
+                                            <span>{a.facultyName}</span>
+                                            {(() => {
+                                              const cred = facultyCredLookup[a.facultyId];
+                                              if (!cred || !cred.compositeScore) return null;
+                                              return (
+                                                <span className="ml-1.5 text-[9px] px-1.5 py-0.5 rounded-full bg-violet-100 text-violet-600 font-medium">
+                                                  w:{(cred.compositeScore).toFixed(2)}
+                                                </span>
+                                              );
+                                            })()}
                                           </td>
                                           <td className="px-3 py-2">
                                             <span

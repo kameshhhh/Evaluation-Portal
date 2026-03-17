@@ -166,8 +166,8 @@ class TemporalSmoother {
         ? parseFloat(currentProfile)
         : startScore;
 
-    // Gentle adjustment: move 10% toward the new composite per grace session
-    const graceAlpha = 0.1;
+    // Gentle adjustment: move 30% toward the new composite per grace session
+    const graceAlpha = 0.3;
     const adjusted = graceAlpha * newComposite + (1 - graceAlpha) * profile;
     const smoothedScore = Math.max(0.1, Math.min(0.95, adjusted));
 

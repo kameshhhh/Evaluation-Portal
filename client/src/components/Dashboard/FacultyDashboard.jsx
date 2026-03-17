@@ -26,10 +26,14 @@ import {
   FlaskConical,
   Calculator,
   ClipboardList,
+  Bell,
+  Scale,
 } from "lucide-react";
 
 // Sub-components
 import { DashboardHeader, SessionGrid } from "./faculty";
+import FacultyAlertsTab from "./faculty/FacultyAlertsTab";
+import FacultyComparativeReviewTab from "./faculty/ComparativeReviewTab";
 
 // Services & Hooks
 import {
@@ -73,6 +77,9 @@ const FacultyDashboard = ({ data: preloadedData, onRefresh }) => {
 
   // Credibility score state (SRS §5.1)
   const [credibility, setCredibility] = useState(null);
+
+  // Tab state for switching between Sessions and Alerts
+  const [activeTab, setActiveTab] = useState("sessions");
 
   // ============================================================
   // DATA FETCHING
@@ -308,6 +315,54 @@ const FacultyDashboard = ({ data: preloadedData, onRefresh }) => {
         </div>
 
         {/* ====================================================== */}
+        {/* TAB NAVIGATION — Switch between Sessions and Alerts */}
+        {/* ====================================================== */}
+        <div className="flex gap-2 bg-white rounded-2xl shadow-sm border border-gray-200/50 p-1.5 mb-6 overflow-x-auto">
+          <button
+            onClick={() => setActiveTab("sessions")}
+            className={`flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-medium whitespace-nowrap flex-shrink-0 transition-all duration-200 ${
+              activeTab === "sessions"
+                ? "bg-violet-50 text-violet-700 shadow-sm border border-violet-200/50"
+                : "text-gray-500 hover:text-gray-700 hover:bg-gray-50"
+            }`}
+          >
+            <ClipboardList className="h-4 w-4" />
+            Sessions
+          </button>
+          <button
+            onClick={() => setActiveTab("alerts")}
+            className={`flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-medium whitespace-nowrap flex-shrink-0 transition-all duration-200 ${
+              activeTab === "alerts"
+                ? "bg-orange-50 text-orange-700 shadow-sm border border-orange-200/50"
+                : "text-gray-500 hover:text-gray-700 hover:bg-gray-50"
+            }`}
+          >
+            <Bell className="h-4 w-4" />
+            Alerts
+          </button>
+          <button
+            onClick={() => setActiveTab("comparative-review")}
+            className={`flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-medium whitespace-nowrap flex-shrink-0 transition-all duration-200 ${
+              activeTab === "comparative-review"
+                ? "bg-indigo-50 text-indigo-700 shadow-sm border border-indigo-200/50"
+                : "text-gray-500 hover:text-gray-700 hover:bg-gray-50"
+            }`}
+          >
+            <Scale className="h-4 w-4" />
+            Comp. Review
+          </button>
+        </div>
+
+        {/* ====================================================== */}
+        {/* TAB CONTENT */}
+        {/* ====================================================== */}
+        {activeTab === "alerts" && <FacultyAlertsTab />}
+
+        {activeTab === "comparative-review" && <FacultyComparativeReviewTab />}
+
+        {activeTab === "sessions" && (
+          <>
+        {/* ====================================================== */}
         {/* SECTION HEADER — Evaluation Sessions */}
         {/* ====================================================== */}
         <div className="flex items-center justify-between mt-5 sm:mt-6 mb-3 sm:mb-4">
@@ -452,6 +507,8 @@ const FacultyDashboard = ({ data: preloadedData, onRefresh }) => {
           projectsBySession={projectsBySession}
           loading={loading}
         />
+          </>
+        )}
       </div>
     </div>
   );

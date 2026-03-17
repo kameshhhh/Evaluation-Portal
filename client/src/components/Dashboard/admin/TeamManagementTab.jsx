@@ -15,12 +15,14 @@ import {
   Filter,
   Crown,
   MessageSquare,
+  Trash2,
 } from "lucide-react";
 import { useDataChange } from "../../../hooks/useSocketEvent";
 import {
   listTeamFormations,
   approveTeamFormation,
   rejectTeamFormation,
+  deleteTeamFormation,
 } from "../../../services/sessionPlannerApi";
 
 const STATUS_FILTERS = [
@@ -73,6 +75,7 @@ const TeamManagementTab = () => {
   const [actionLoading, setActionLoading] = useState(null);
   const [rejectNote, setRejectNote] = useState({});
   const [showRejectInput, setShowRejectInput] = useState(null);
+  const [confirmDelete, setConfirmDelete] = useState(null);
   const [error, setError] = useState(null);
 
   useDataChange("team_formation", () => loadFormations());
@@ -116,6 +119,19 @@ const TeamManagementTab = () => {
       await loadFormations();
     } catch (err) {
       setError(err.response?.data?.error || "Failed to reject");
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
+  const handleDelete = async (formationId) => {
+    try {
+      setActionLoading(formationId);
+      await deleteTeamFormation(formationId);
+      setConfirmDelete(null);
+      await loadFormations();
+    } catch (err) {
+      setError(err.response?.data?.error || "Failed to delete");
     } finally {
       setActionLoading(null);
     }
@@ -306,6 +322,43 @@ const TeamManagementTab = () => {
                     {f.review_note}
                   </div>
                 )}
+
+                {/* Delete button — available for all statuses */}
+                <div className="flex justify-end mt-2">
+                  {confirmDelete === f.id ? (
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs text-red-600 font-medium">
+                        Delete permanently?
+                      </span>
+                      <button
+                        onClick={() => handleDelete(f.id)}
+                        disabled={actionLoading === f.id}
+                        className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-white text-xs font-medium bg-red-600 disabled:opacity-50"
+                      >
+                        {actionLoading === f.id ? (
+                          <Loader2 size={12} className="animate-spin" />
+                        ) : (
+                          <Trash2 size={12} />
+                        )}
+                        Yes, Delete
+                      </button>
+                      <button
+                        onClick={() => setConfirmDelete(null)}
+                        className="px-2.5 py-1 rounded-lg text-xs text-gray-500 hover:bg-gray-100"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  ) : (
+                    <button
+                      onClick={() => setConfirmDelete(f.id)}
+                      className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs text-gray-400 hover:text-red-500 hover:bg-red-50 transition-colors"
+                    >
+                      <Trash2 size={12} />
+                      Delete
+                    </button>
+                  )}
+                </div>
               </div>
             );
           })}

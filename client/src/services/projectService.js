@@ -62,6 +62,30 @@ export const listProjects = async (filters = {}, limit = 50, offset = 0) => {
 };
 
 /**
+ * List only the current user's projects (scoped by team membership).
+ * Calls GET /api/projects/mine — returns projects where user is an active member.
+ *
+ * @param {Object} filters - { status, academicYear, semester }
+ * @param {number} limit
+ * @param {number} offset
+ * @returns {Promise<{ projects: Object[], pagination: Object }>}
+ */
+export const listMyProjects = async (filters = {}, limit = 50, offset = 0) => {
+  const params = new URLSearchParams();
+  params.append("limit", limit);
+  params.append("offset", offset);
+  if (filters.status) params.append("status", filters.status);
+  if (filters.academicYear) params.append("academicYear", filters.academicYear);
+  if (filters.semester) params.append("semester", filters.semester);
+
+  const response = await api.get(`/projects/mine?${params.toString()}`);
+  return {
+    projects: response.data.data || [],
+    pagination: response.data.pagination || {},
+  };
+};
+
+/**
  * Get a single project with its team members.
  *
  * @param {string} projectId - UUID
@@ -191,6 +215,7 @@ export const searchPersons = async (filters = {}, limit = 50, offset = 0) => {
 export default {
   createProject,
   listProjects,
+  listMyProjects,
   getProject,
   updateProject,
   transitionProject,

@@ -934,6 +934,78 @@ const rejectTeam = async (req, res) => {
   }
 };
 
+/**
+ * DELETE /admin/teams/:formationId — Admin deletes a team permanently
+ */
+const deleteTeam = async (req, res) => {
+  const client = await require("../config/database").pool.connect();
+  try {
+    const { formationId } = req.params;
+    const adminId = req.user.personId;
+
+    await client.query("BEGIN");
+
+    // Get formation
+    const formation = await client.query(
+      `SELECT * FROM team_formation_requests WHERE id = $1`,
+      [formationId],
+    );
+    if (formation.rows.length === 0) {
+      await client.query("ROLLBACK");
+      return res
+        .status(404)
+        .json({ success: false, error: "Formation not found." });
+    }
+    const f = formation.rows[0];
+
+    // Fetch invitees BEFORE delete (team_invitations cascades on delete)
+    const invitees = await client.query(
+      `SELECT invitee_id FROM team_invitations WHERE formation_id = $1`,
+      [formationId],
+    );
+
+    // NULL out team_formation_id in assignments (no FK constraint)
+    await client.query(
+      `UPDATE session_planner_assignments SET team_formation_id = NULL WHERE team_formation_id = $1`,
+      [formationId],
+    );
+
+    // Soft-delete the linked project (don't hard-delete — project_members has ON DELETE RESTRICT)
+    if (f.project_id) {
+      await client.query(
+        `UPDATE projects SET is_deleted = TRUE, updated_at = NOW(), updated_by = $1 WHERE project_id = $2`,
+        [adminId, f.project_id],
+      );
+    }
+
+    // Delete formation (team_invitations cascade via FK ON DELETE CASCADE)
+    await client.query(
+      `DELETE FROM team_formation_requests WHERE id = $1`,
+      [formationId],
+    );
+
+    await client.query("COMMIT");
+
+    // Notify leader + members
+    emitToPerson("team:deleted", f.leader_id, { formationId });
+    for (const inv of invitees.rows) {
+      emitToPerson("team:deleted", inv.invitee_id, { formationId });
+    }
+    broadcastChange("team_formation", "deleted", { formationId });
+
+    logger.info("Team deleted by admin", { formationId, adminId });
+    return res.json({ success: true, message: "Team deleted." });
+  } catch (error) {
+    await client.query("ROLLBACK");
+    logger.error("Failed to delete team", { error: error.message });
+    return res
+      .status(500)
+      .json({ success: false, error: "Failed to delete team" });
+  } finally {
+    client.release();
+  }
+};
+
 // ============================================================
 // SESSION PLANNER ENDPOINTS (Password-Protected)
 // ============================================================
@@ -1480,6 +1552,17 @@ const getMyEvaluator = async (req, res) => {
     // Attach rubric_name_map to each row
     const rows = result.rows.map(row => ({ ...row, rubric_name_map: rubricNameMap }));
 
+    // Safely enrich with meet_link (column may not exist if migration 051 not run)
+    try {
+      const meetRes = await query(
+        `SELECT session_id, faculty_id, meet_link FROM evaluation_schedules WHERE student_id = $1`,
+        [studentId]
+      );
+      const meetMap = {};
+      meetRes.rows.forEach(r => { meetMap[`${r.session_id}_${r.faculty_id}`] = r.meet_link; });
+      rows.forEach(row => { row.meet_link = meetMap[`${row.session_id}_${row.faculty_id}`] || ''; });
+    } catch (_) { rows.forEach(row => { row.meet_link = ''; }); }
+
     return res.json({ success: true, data: rows });
   } catch (error) {
     logger.error("Failed to get my evaluator", { error: error.message });
@@ -1592,8 +1675,8 @@ async function _createSoloTeam(personId, academicYear, semester) {
 // POST /planner/submit-marks — Faculty submits PER-RUBRIC marks
 // ============================================================
 // Accepts: { sessionId, studentId, rubricMarks: { rubricId: 0-5 }, zeroFeedback: { rubricId: "text" }, feedback }
-// Pool: per-team (team_size × 5), divided per rubric with floor+remainder (alphabetical)
-// Zero marks: allowed but require mandatory feedback (20+ chars)
+// Pool: per-student (always 5), divided per rubric with floor+remainder (alphabetical)
+// Teams are for UI grouping only — each student has independent 5-point pool
 // ============================================================
 const CredibilityService = require("../services/credibility/CredibilityService");
 const MIN_ZERO_FEEDBACK_LENGTH = 20;
@@ -1730,9 +1813,9 @@ const submitMarks = async (req, res) => {
         ? allAssignments.filter(r => r.team_formation_id === teamFormationId)
         : [thisStudentRow || { student_id: studentId }];
 
-      const teamSize = teamAssignments.length;
       const rubricCount = rubricIds.length;
-      const teamPool = teamSize * MAX_MARKS_PER_RUBRIC;
+      // Pool is always 5 per student — teams are UI grouping only
+      const studentPool = MAX_MARKS_PER_RUBRIC;
 
       // Sort rubrics by name for consistent remainder distribution
       rubricNamesRes = await client.query(
@@ -1743,37 +1826,25 @@ const submitMarks = async (req, res) => {
       const sortedRubricIds = rubricNamesRes.rows.map(r => r.head_id);
       orderedRubrics = sortedRubricIds.length > 0 ? sortedRubricIds : [...rubricIds].sort();
 
-      const basePool = Math.floor(teamPool / rubricCount);
-      const poolRemainder = teamPool - (basePool * rubricCount);
+      const basePool = Math.floor(studentPool / rubricCount);
+      const poolRemainder = studentPool - (basePool * rubricCount);
       rubricPools = {};
       orderedRubrics.forEach((rid, idx) => {
         rubricPools[rid] = basePool + (idx < poolRemainder ? 1 : 0);
       });
 
-      // Calculate used marks per rubric across team
+      // Each student has independent pool — no cross-member deduction
       usedPerRubric = {};
       orderedRubrics.forEach(rid => { usedPerRubric[rid] = 0; });
 
-      for (const ta of teamAssignments) {
-        if (ta.marks_submitted_at && ta.rubric_marks && ta.student_id !== studentId) {
-          const rm = typeof ta.rubric_marks === 'string' ? JSON.parse(ta.rubric_marks) : ta.rubric_marks;
-          for (const [rid, marks] of Object.entries(rm)) {
-            usedPerRubric[rid] = (usedPerRubric[rid] || 0) + Number(marks);
-          }
-        }
-      }
-
-      // Validate each rubric against its pool
+      // Validate each rubric against its per-student pool
       for (const [rubricId, mark] of Object.entries(rubricMarks)) {
         const numMark = Number(mark);
-        const pool = rubricPools[rubricId] || (teamPool / rubricCount);
-        const used = usedPerRubric[rubricId] || 0;
-        const remaining = pool - used;
-        if (numMark > remaining) {
+        const pool = rubricPools[rubricId] || Math.floor(studentPool / rubricCount);
+        if (numMark > pool) {
           await client.query("ROLLBACK");
           const rubricName = rubricNamesRes.rows.find(r => r.head_id === rubricId)?.head_name || rubricId;
-          // Do NOT call client.release() here — finally block handles it
-          throw Object.assign(new Error(`Exceeds rubric pool for "${rubricName}". Pool: ${pool}, Used: ${used}, Remaining: ${remaining}, Requested: ${numMark}.`), { statusCode: 400 });
+          throw Object.assign(new Error(`Exceeds rubric pool for "${rubricName}". Pool: ${pool}, Requested: ${numMark}.`), { statusCode: 400 });
         }
       }
 
@@ -1874,7 +1945,7 @@ const submitMarks = async (req, res) => {
     const poolResponse = {};
     for (const rid of orderedRubrics) {
       const pool = rubricPools[rid] || 0;
-      const usedNow = (usedPerRubric[rid] || 0) + (Number(rubricMarks[rid]) || 0);
+      const usedNow = Number(rubricMarks[rid]) || 0;
       poolResponse[rid] = { pool, used: usedNow, remaining: pool - usedNow };
     }
 
@@ -1959,26 +2030,26 @@ const getMySessions = async (req, res) => {
            p.graduation_year AS batch_year,
            u.normalized_email AS email,
            sts.track,
-           COALESCE(tfr.id, tfr2.id)             AS team_id,
+           tfr.team_formation_id                  AS team_id,
            proj.title         AS team_title,
            es.scheduled_date,
            es.scheduled_time,
            es.venue           AS scheduled_venue,
            (SELECT p2.display_name
             FROM persons p2
-            WHERE p2.person_id = COALESCE(tfr.leader_id, tfr2.leader_id)
+            WHERE p2.person_id = tfr.leader_id
             LIMIT 1)          AS team_leader_name,
            (SELECT json_agg(json_build_object(
               'personId', mp.person_id,
               'displayName', mp.display_name,
               'departmentCode', mp.department_code,
-              'role', CASE WHEN mp.person_id = COALESCE(tfr.leader_id, tfr2.leader_id) THEN 'leader' ELSE 'member' END
+              'role', CASE WHEN mp.person_id = tfr.leader_id THEN 'leader' ELSE 'member' END
             ))
             FROM (
-              SELECT COALESCE(tfr.leader_id, tfr2.leader_id) AS pid
+              SELECT tfr.leader_id AS pid WHERE tfr.team_formation_id IS NOT NULL
               UNION
               SELECT ti3.invitee_id FROM team_invitations ti3
-              WHERE ti3.formation_id = COALESCE(tfr.id, tfr2.id) AND ti3.status = 'accepted'
+              WHERE ti3.formation_id = tfr.team_formation_id AND ti3.status = 'accepted'
             ) team_pids
             JOIN persons mp ON mp.person_id = team_pids.pid
            ) AS team_members,
@@ -1998,26 +2069,83 @@ const getMySessions = async (req, res) => {
          LEFT JOIN users u ON u.internal_user_id = p.identity_id
          LEFT JOIN student_track_selections sts ON sts.person_id = p.person_id
          LEFT JOIN evaluation_schedules es ON es.session_id = spa.session_id AND es.student_id = spa.student_id AND es.faculty_id = spa.faculty_id
-         LEFT JOIN team_formation_requests tfr ON (
-           tfr.leader_id = p.person_id
-         ) AND tfr.status = 'admin_approved'
-         LEFT JOIN team_invitations ti ON ti.invitee_id = p.person_id AND ti.status = 'accepted'
-         LEFT JOIN team_formation_requests tfr2 ON (
-           tfr2.id = ti.formation_id AND tfr.id IS NULL
-         ) AND tfr2.status = 'admin_approved'
-         LEFT JOIN projects proj ON proj.project_id = COALESCE(tfr.project_id, tfr2.project_id)
+         LEFT JOIN LATERAL (
+           SELECT tfr_any.id AS team_formation_id, tfr_any.leader_id, tfr_any.project_id
+           FROM team_formation_requests tfr_any
+           WHERE tfr_any.status = 'admin_approved'
+             AND (
+               tfr_any.id = spa.team_formation_id
+               OR (
+                 spa.team_formation_id IS NULL
+                 AND (
+                   tfr_any.leader_id = spa.student_id
+                   OR EXISTS (
+                     SELECT 1 FROM team_invitations ti_fb
+                     WHERE ti_fb.formation_id = tfr_any.id
+                       AND ti_fb.invitee_id = spa.student_id
+                       AND ti_fb.status = 'accepted'
+                   )
+                 )
+               )
+             )
+           LIMIT 1
+         ) tfr ON true
+         LEFT JOIN projects proj ON proj.project_id = tfr.project_id
          WHERE spa.session_id = $1 
            AND spa.faculty_id = $2
            AND spa.status != 'removed'
            AND p.is_deleted = false AND p.status = 'active'
-         ORDER BY COALESCE(tfr.id, tfr2.id) NULLS LAST, p.display_name`,
+         ORDER BY tfr.team_formation_id NULLS LAST, p.display_name`,
         [sess.session_id, personId],
       );
 
+      const studentRows = students.rows;
+
+      // Safely enrich with meet_link (may not exist if migration 051 not run)
+      try {
+        const meetRes = await query(
+          `SELECT faculty_id, student_id, meet_link FROM evaluation_schedules WHERE session_id = $1`,
+          [sess.session_id]
+        );
+        const meetMap = {};
+        meetRes.rows.forEach(r => { meetMap[`${r.faculty_id}_${r.student_id}`] = r.meet_link; });
+        studentRows.forEach(s => {
+          s.meet_link = meetMap[`${personId}_${s.student_id}`] || '';
+          // Also enrich all_schedules with meetLink
+          if (s.all_schedules) {
+            s.all_schedules.forEach(sc => {
+              sc.meetLink = meetMap[`${sc.facultyId}_${s.student_id}`] || '';
+            });
+          }
+        });
+      } catch (_) {
+        studentRows.forEach(s => { s.meet_link = ''; });
+      }
+
+      // Safely enrich with github token info (may not exist if migration 050 not run)
+      try {
+        const studentIds = studentRows.map(s => s.student_id);
+        if (studentIds.length > 0) {
+          const gtRes = await query(
+            `SELECT person_id, github_username, is_valid FROM github_tokens WHERE person_id = ANY($1::uuid[])`,
+            [studentIds]
+          );
+          const gtMap = {};
+          gtRes.rows.forEach(r => { gtMap[r.person_id] = r; });
+          studentRows.forEach(s => {
+            const gt = gtMap[s.student_id];
+            s.github_username = gt?.github_username || null;
+            s.has_github_token = gt?.is_valid || false;
+          });
+        }
+      } catch (_) {
+        studentRows.forEach(s => { s.github_username = null; s.has_github_token = false; });
+      }
+
       result.push({
         ...sess,
-        studentCount: students.rows.length,
-        students: students.rows,
+        studentCount: studentRows.length,
+        students: studentRows,
       });
     }
 
@@ -2253,6 +2381,72 @@ const setSchedule = async (req, res) => {
     return res.json({ success: true, data: results });
   } catch (error) {
     logger.error("setSchedule failed", { error: error.message });
+    return res.status(500).json({ success: false, error: error.message });
+  }
+};
+
+/**
+ * POST /planner/set-meet-link — Faculty sends an optional meet link to a student
+ * Body: { sessionId, studentId, meetLink }
+ */
+const setMeetLink = async (req, res) => {
+  try {
+    const { sessionId, studentId, meetLink } = req.body;
+    const facultyId = req.user.personId;
+
+    if (!sessionId || !studentId) {
+      return res.status(400).json({ success: false, error: "sessionId and studentId are required." });
+    }
+
+    // Validate faculty is assigned to this student in this session
+    const assignCheck = await query(
+      `SELECT id FROM session_planner_assignments
+       WHERE session_id = $1 AND faculty_id = $2 AND student_id = $3 AND status != 'removed'`,
+      [sessionId, facultyId, studentId]
+    );
+    if (assignCheck.rows.length === 0) {
+      return res.status(403).json({ success: false, error: "You are not assigned to evaluate this student." });
+    }
+
+    // Ensure meet_link column exists (safe to run multiple times)
+    try {
+      await query(`ALTER TABLE evaluation_schedules ADD COLUMN IF NOT EXISTS meet_link TEXT NOT NULL DEFAULT ''`);
+    } catch (_) { /* column already exists or other DDL issue — proceed anyway */ }
+
+    // UPSERT meet link into evaluation_schedules
+    const result = await query(
+      `INSERT INTO evaluation_schedules (session_id, faculty_id, student_id, scheduled_date, scheduled_time, venue, meet_link)
+       VALUES ($1, $2, $3, COALESCE(
+         (SELECT scheduled_date FROM evaluation_schedules WHERE session_id = $1 AND student_id = $3 AND faculty_id = $2),
+         CURRENT_DATE
+       ), COALESCE(
+         (SELECT scheduled_time FROM evaluation_schedules WHERE session_id = $1 AND student_id = $3 AND faculty_id = $2),
+         '00:00'::time
+       ), COALESCE(
+         (SELECT venue FROM evaluation_schedules WHERE session_id = $1 AND student_id = $3 AND faculty_id = $2),
+         ''
+       ), $4)
+       ON CONFLICT (session_id, student_id, faculty_id)
+       DO UPDATE SET meet_link = $4, updated_at = NOW()
+       RETURNING *`,
+      [sessionId, facultyId, studentId, meetLink || ""]
+    );
+
+    // Notify student in real-time
+    emitToPerson("meet_link_updated", studentId, {
+      sessionId,
+      facultyId,
+      meetLink: meetLink || "",
+    });
+
+    broadcastChange("session_planner", "meet_link_updated", {
+      sessionId, facultyId, studentId,
+    });
+
+    logger.info("Meet link set", { sessionId, facultyId, studentId });
+    return res.json({ success: true, data: result.rows[0] });
+  } catch (error) {
+    logger.error("setMeetLink failed", { error: error.message });
     return res.status(500).json({ success: false, error: error.message });
   }
 };
@@ -2628,9 +2822,7 @@ const finalizeSessionManual = async (req, res) => {
     if (!statusCheck.rows[0]) {
       return res.status(404).json({ success: false, error: "Session not found" });
     }
-    if (statusCheck.rows[0].status === 'FINALIZED') {
-      return res.status(409).json({ success: false, error: "Session is already finalized." });
-    }
+    const isRefinalize = statusCheck.rows[0].status === 'FINALIZED';
 
     // Guard: must have at least some submitted marks
     const marksCheck = await query(
@@ -2654,8 +2846,9 @@ const finalizeSessionManual = async (req, res) => {
     broadcastChange('session_planner', 'session_completed', { sessionId });
 
     const protectionNote = result.firstSessionProtection
-      ? " (first-session two-pass protection applied)"
+      ? " (first-session: raw averages kept, judge credibility saved for next session)"
       : "";
+    const refinalizeNote = isRefinalize ? " (re-finalized)" : "";
 
     logger.info("Session manually finalized by admin", {
       sessionId,
@@ -2663,11 +2856,12 @@ const finalizeSessionManual = async (req, res) => {
       studentsScored: result.studentsScored,
       alertsDetected: anomalyResult.alerts.length,
       firstSessionProtection: result.firstSessionProtection,
+      isRefinalize,
     });
 
     return res.json({
       success: true,
-      message: `Session finalized. ${result.studentsScored} students scored using credibility-weighted aggregation${protectionNote}.`,
+      message: `Session finalized${refinalizeNote}. ${result.studentsScored} students scored using credibility-weighted aggregation${protectionNote}.`,
       studentsScored: result.studentsScored,
       alerts: anomalyResult.alerts,
       firstSessionProtection: result.firstSessionProtection || false,
@@ -2915,6 +3109,7 @@ module.exports = {
   listTeamFormations,
   approveTeam,
   rejectTeam,
+  deleteTeam,
   // Session planner
   verifyPlannerPassword,
   getPlannerOverview,
@@ -2929,6 +3124,7 @@ module.exports = {
   submitMarks,
   // Scheduling
   setSchedule,
+  setMeetLink,
   getStudentSchedules,
   getMySchedules,
   getMyResults,

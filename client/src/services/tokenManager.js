@@ -1,27 +1,25 @@
 // ============================================================
-// TOKEN MANAGER — In-Memory JWT Token Storage
+// TOKEN MANAGER — JWT Token Storage with localStorage persistence
 // ============================================================
-// Manages the JWT token in memory (JavaScript variable), NOT in
-// localStorage or sessionStorage. Memory storage is the most
-// secure option because:
-// 1. XSS attacks cannot read JavaScript variables (only storage APIs)
-// 2. Token is automatically cleared on page refresh (fail-safe)
-// 3. No persistent exposure to browser extensions or DevTools
-// TRADEOFF: Token is lost on page refresh — user must re-verify
+// Manages the JWT token in memory AND localStorage so the session
+// survives page refreshes. On module load the token is restored
+// from localStorage into the in-memory variable for fast access.
 // ============================================================
+  
+const TOKEN_KEY = "auth_token";
+const USER_KEY = "auth_user";
 
-// ============================================================
-// In-memory token store — the token lives only in this variable
-// It's a module-level variable, so it persists for the app's lifetime
-// but is cleared when the browser tab is closed or refreshed
-// ============================================================
-let accessToken = null;
+// Restore from localStorage on module load (survives refresh)
+let accessToken = (() => {
+  try { return localStorage.getItem(TOKEN_KEY); } catch { return null; }
+})();
 
-// ============================================================
-// In-memory user data store — cached user profile from login
-// Stored alongside the token for quick access without API calls
-// ============================================================
-let userData = null;
+let userData = (() => {
+  try {
+    const stored = localStorage.getItem(USER_KEY);
+    return stored ? JSON.parse(stored) : null;
+  } catch { return null; }
+})();
 
 /**
  * Store the JWT access token in memory.
@@ -30,9 +28,8 @@ let userData = null;
  * @param {string} token - JWT access token from the backend
  */
 export const setToken = (token) => {
-  // Store the token in the module-level variable
-  // This is accessible from any file that imports this module
   accessToken = token;
+  try { localStorage.setItem(TOKEN_KEY, token); } catch { /* ignore */ }
 };
 
 /**
@@ -53,6 +50,7 @@ export const getToken = () => {
  */
 export const setUser = (user) => {
   userData = user;
+  try { localStorage.setItem(USER_KEY, JSON.stringify(user)); } catch { /* ignore */ }
 };
 
 /**
@@ -70,9 +68,13 @@ export const getUser = () => {
  * Also called when the backend returns 401 (token expired/invalid).
  */
 export const clearAuth = () => {
-  // Set both to null — garbage collector will reclaim the memory
   accessToken = null;
   userData = null;
+  try {
+    localStorage.removeItem(TOKEN_KEY);
+    localStorage.removeItem(USER_KEY);
+    localStorage.removeItem("user_profile_cache");
+  } catch { /* ignore */ }
 };
 
 /**

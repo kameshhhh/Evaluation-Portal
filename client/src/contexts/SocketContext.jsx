@@ -80,6 +80,17 @@ export const EVENTS = {
   PROJECT_UPDATED: "project:updated",
   PROJECT_DELETED: "project:deleted",
 
+  // GitHub-Lite: Repository events
+  REPO_FILE_COMMITTED: "repo:fileCommitted",
+  REPO_FILE_DELETED: "repo:fileDeleted",
+  REPO_BRANCH_CREATED: "repo:branchCreated",
+  REPO_BRANCH_DELETED: "repo:branchDeleted",
+  REPO_ISSUE_CREATED: "repo:issueCreated",
+  REPO_ISSUE_UPDATED: "repo:issueUpdated",
+  REPO_PR_CREATED: "repo:prCreated",
+  REPO_PR_UPDATED: "repo:prUpdated",
+  REPO_PR_COMMENTED: "repo:prCommented",
+
   // Credibility
   CREDIBILITY_UPDATED: "credibility:updated",
 
@@ -135,7 +146,6 @@ export const SocketProvider = ({ children }) => {
     });
 
     socket.on("connect", () => {
-      console.log("[Socket.IO] Connected:", socket.id);
       setConnected(true);
     });
 
@@ -146,12 +156,10 @@ export const SocketProvider = ({ children }) => {
     });
 
     socket.on("disconnect", (reason) => {
-      console.log("[Socket.IO] Disconnected:", reason);
       setConnected(false);
     });
 
     socket.on("connect_error", (err) => {
-      console.warn("[Socket.IO] Connection error:", err.message);
       setConnected(false);
     });
 

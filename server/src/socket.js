@@ -78,6 +78,17 @@ const EVENTS = {
   PROJECT_UPDATED: "project:updated",
   PROJECT_DELETED: "project:deleted",
 
+  // GitHub-Lite: Repository events
+  REPO_FILE_COMMITTED: "repo:fileCommitted",
+  REPO_FILE_DELETED: "repo:fileDeleted",
+  REPO_BRANCH_CREATED: "repo:branchCreated",
+  REPO_BRANCH_DELETED: "repo:branchDeleted",
+  REPO_ISSUE_CREATED: "repo:issueCreated",
+  REPO_ISSUE_UPDATED: "repo:issueUpdated",
+  REPO_PR_CREATED: "repo:prCreated",
+  REPO_PR_UPDATED: "repo:prUpdated",
+  REPO_PR_COMMENTED: "repo:prCommented",
+
   // Credibility
   CREDIBILITY_UPDATED: "credibility:updated",
 
@@ -193,6 +204,23 @@ function initialize(httpServer) {
       }
     });
 
+    // ---- Client can join/leave project-specific rooms ----
+    socket.on("join:project", (projectId) => {
+      if (projectId) {
+        socket.join(`project:${projectId}`);
+        logger.debug("Socket joined project room", {
+          socketId: socket.id,
+          projectId,
+        });
+      }
+    });
+
+    socket.on("leave:project", (projectId) => {
+      if (projectId) {
+        socket.leave(`project:${projectId}`);
+      }
+    });
+
     // ---- Disconnect cleanup ----
     socket.on("disconnect", (reason) => {
       logger.info("Socket disconnected", {
@@ -273,6 +301,21 @@ function emitToSession(event, sessionId, data) {
 }
 
 /**
+ * Emit an event to all clients watching a specific project.
+ * @param {string} event
+ * @param {string} projectId
+ * @param {object} data
+ */
+function emitToProject(event, projectId, data) {
+  if (!io) return;
+  io.to(`project:${projectId}`).emit(event, {
+    ...data,
+    projectId,
+    timestamp: new Date().toISOString(),
+  });
+}
+
+/**
  * Broadcast a generic data-change event. Clients use entityType + entityId
  * to decide whether to refetch.
  * @param {string} entityType — e.g. "session", "allocation", "score"
@@ -315,6 +358,7 @@ module.exports = {
   emitToUser,
   emitToPerson,
   emitToSession,
+  emitToProject,
   broadcastChange,
   EVENTS,
 };

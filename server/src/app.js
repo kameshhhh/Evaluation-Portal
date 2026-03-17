@@ -349,6 +349,30 @@ app.use("/api/session-report", sessionReportRoutes);
 app.use("/api/appeals", appealsRoutes);
 
 // ============================================================
+// SESSION WORK LOGS — Weekly session logs + admin log viewer
+// ============================================================
+const sessionWorkLogRoutes = require("./routes/sessionWorkLogRoutes");
+app.use("/api/session-work-logs", sessionWorkLogRoutes);
+
+// ============================================================
+// DAILY WORK LOGS — Student daily structured logs + admin viewer
+// ============================================================
+const dailyWorkLogRoutes = require("./routes/dailyWorkLogRoutes");
+app.use("/api/daily-work-logs", dailyWorkLogRoutes);
+
+// ============================================================
+// GITHUB — PAT management + student GitHub profile viewer
+// ============================================================
+const githubRoutes = require("./routes/githubRoutes");
+app.use("/api/github", githubRoutes);
+
+// ============================================================
+// EVALUATION ACTIVITY — Admin evaluation tracking & student insights
+// ============================================================
+const evalActivityRoutes = require("./routes/evalActivityRoutes");
+app.use("/api/eval-activity", evalActivityRoutes);
+
+// ============================================================
 // ALERTS — Faculty anomaly detection alerts
 // ============================================================
 app.use("/api/alerts", alertsRoutes);
@@ -357,6 +381,12 @@ app.use("/api/alerts", alertsRoutes);
 // ADMIN MANAGEMENT — Session delete & credibility reset
 // ============================================================
 app.use("/api/admin-manage", adminManagementRoutes);
+
+// ============================================================
+// COMPARATIVE REVIEW — Head-to-head team comparison module
+// ============================================================
+const comparativeReviewRoutes = require("./routes/comparativeReviewRoutes");
+app.use("/api/comparative-review", comparativeReviewRoutes);
 
 // ============================================================
 // 404 HANDLER — Catch unmatched routes

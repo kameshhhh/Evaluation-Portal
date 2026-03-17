@@ -1,8 +1,8 @@
 // ============================================================
-// PROJECT LIST PAGE — Browse All Projects
+// PROJECT LIST PAGE — Role-Based Project Browser
 // ============================================================
-// Fetches real project data from GET /api/projects.
-// NO dummy/static data — everything from backend.
+// Students & Faculty: see only their team's projects via /mine
+// Admins: see all projects in the system via /projects
 // Clickable cards navigate to EnhancedProjectDashboard.
 // ============================================================
 
@@ -22,7 +22,8 @@ import {
   ChevronRight,
   AlertTriangle,
 } from "lucide-react";
-import { listProjects } from "../../services/projectService";
+import { listProjects, listMyProjects } from "../../services/projectService";
+import useAuth from "../../hooks/useAuth";
 
 // Status color map
 const statusColors = {
@@ -44,6 +45,10 @@ const formatStatus = (s) =>
 
 const ProjectListPage = () => {
   const navigate = useNavigate();
+  const { user } = useAuth();
+
+  // Determine role — admins see all, others see only their own
+  const isAdmin = user?.role === "admin";
 
   // State
   const [projects, setProjects] = useState([]);
@@ -60,7 +65,7 @@ const ProjectListPage = () => {
   });
   const [showFilters, setShowFilters] = useState(false);
 
-  // Fetch projects from backend
+  // Fetch projects from backend — role-based
   const fetchProjects = useCallback(async () => {
     setLoading(true);
     setError(null);
@@ -71,12 +76,14 @@ const ProjectListPage = () => {
         activeFilters.academicYear = filters.academicYear;
       if (filters.semester) activeFilters.semester = filters.semester;
 
-      const result = await listProjects(activeFilters, 100, 0);
+      // Admins see all projects; students & faculty see only their own
+      const fetchFn = isAdmin ? listProjects : listMyProjects;
+      const result = await fetchFn(activeFilters, 100, 0);
       setProjects(result.projects);
       setPagination(result.pagination);
     } catch (err) {
       const rawMsg =
-        err.response?.data?.message || err.message || "Failed to load projects";
+        err.response?.data?.message || err.response?.data?.error || err.message || "Failed to load projects";
       setError(
         typeof rawMsg === "string"
           ? rawMsg
@@ -85,7 +92,7 @@ const ProjectListPage = () => {
     } finally {
       setLoading(false);
     }
-  }, [filters]);
+  }, [filters, isAdmin]);
 
   useEffect(() => {
     fetchProjects();
@@ -117,7 +124,7 @@ const ProjectListPage = () => {
             <div>
               <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
                 <FolderOpen className="h-6 w-6 text-blue-600" />
-                All Projects
+                {isAdmin ? "All Projects" : "My Projects"}
               </h1>
               <p className="text-sm text-gray-500">
                 {pagination.total || filteredProjects.length} project

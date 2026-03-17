@@ -368,7 +368,7 @@ const SessionPlannerPage = () => {
       await loadInitialData();
       const warnings = [];
       if (res.firstSessionProtection) {
-        warnings.push("First-session two-pass protection was applied — faculty credibility was computed within this session for fairer scoring.");
+        warnings.push("First session — raw averages used for student scores. Judge credibility has been computed and saved for future sessions.");
       }
       setResultModal({
         title: 'Session Finalized',
@@ -997,6 +997,19 @@ const SessionPlannerPage = () => {
               ) : null;
             })()}
           </div>
+          {user?.role === 'admin' && (
+            <div className="mt-2 flex items-center gap-2">
+              <button
+                onClick={handleFinalizeSession}
+                disabled={finalizing}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white border border-emerald-300 text-emerald-700 text-xs font-semibold hover:bg-emerald-50 disabled:opacity-50 transition-colors"
+              >
+                <RefreshCw size={12} className={finalizing ? 'animate-spin' : ''} />
+                {finalizing ? 'Re-Finalizing...' : 'Re-Finalize Scores'}
+              </button>
+              <span className="text-[10px] text-emerald-600">Recalculates all student scores with current credibility weights</span>
+            </div>
+          )}
         </div>
       )}
 

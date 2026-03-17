@@ -76,6 +76,10 @@ export const approveTeamFormation = (formationId, note) =>
 export const rejectTeamFormation = (formationId, note) =>
   d(api.post(`${BASE}/admin/teams/${formationId}/reject`, { note }));
 
+/** Delete a team formation (admin) */
+export const deleteTeamFormation = (formationId) =>
+  d(api.delete(`${BASE}/admin/teams/${formationId}`));
+
 // ============================================================
 // SESSION PLANNER (Password-Gated)
 // ============================================================
@@ -162,6 +166,16 @@ export const setSchedule = (sessionId, studentIds, date, time, venue) =>
       date,
       time,
       venue,
+    }),
+  );
+
+/** Faculty: send meet link to a specific student (optional) */
+export const setMeetLink = (sessionId, studentId, meetLink) =>
+  d(
+    api.post(`${BASE}/planner/set-meet-link`, {
+      sessionId,
+      studentId,
+      meetLink,
     }),
   );
 

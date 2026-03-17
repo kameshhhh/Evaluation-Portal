@@ -171,4 +171,8 @@ export const ROUTES = {
   SESSION_PLANNER: "/session-planner/:sessionId",
   SESSION_PLANNER_BASE: "/session-planner",
   SESSION_PLANNER_DETAIL: "/session-planner/view/:sessionId",
+  // Work Log — standalone time-tracking tab
+  WORKLOG: "/worklog",
+  // GitHub Profile — admin views student's GitHub
+  GITHUB_PROFILE: "/github/:personId",
 };

@@ -229,12 +229,8 @@ const getEvaluatorProfile = async (req, res) => {
     let profile;
 
     if (jcm) {
-      // Map judge_credibility_metrics to the same response shape
-      // After reset: display_score=NULL, credibility_score=1.0, band='NEW'
-      // For NEW band with NULL display_score → return 1.0 (same as brand-new default)
-      const displayScore = jcm.display_score != null
-        ? jcm.display_score
-        : (jcm.credibility_band === 'NEW' ? 1.0 : jcm.credibility_score / 2.0);
+      // credibility_score is now 0-1 directly (unified scale)
+      const displayScore = jcm.credibility_score;
       profile = {
         evaluator_id: jcm.evaluator_id,
         credibility_score: displayScore,
@@ -250,7 +246,7 @@ const getEvaluatorProfile = async (req, res) => {
 
       // Build history signals from jcm.history JSONB
       const jcmHistory = (jcm.history || []).map((h) => ({
-        composite_score: h.composite ?? h.displayScore / 100,
+        composite_score: h.composite ?? h.displayScore,
         alignment_score: h.alignment_score,
         stability_score: h.stability_score,
         discipline_score: h.discipline_score,
