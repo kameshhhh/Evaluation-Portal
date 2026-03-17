@@ -23,6 +23,8 @@ class AppealService {
    * Returns { eligible: boolean, reasons: string[], deadline: ISO }
    */
   async checkEligibility(studentId, sessionId) {
+    logger.info("checkEligibility called", { studentId, sessionId });
+
     // 1. One appeal per session check
     const existingAppeal = await query(
       `SELECT id, status FROM score_appeals
@@ -30,6 +32,10 @@ class AppealService {
       [studentId, sessionId]
     );
     if (existingAppeal.rows.length > 0) {
+      logger.info("checkEligibility: Already appealed", {
+        studentId,
+        sessionId,
+      });
       return {
         eligible: false,
         reasons: ["You have already filed an appeal for this session."],
@@ -43,10 +49,15 @@ class AppealService {
       [sessionId]
     );
     if (sessionRes.rows.length === 0) {
+      logger.warn("checkEligibility: Session not found", { studentId, sessionId });
       return { eligible: false, reasons: ["Session not found."] };
     }
     const session = sessionRes.rows[0];
     if (!session.finalized_at) {
+      logger.warn("checkEligibility: Session not finalized", {
+        studentId,
+        sessionId,
+      });
       return { eligible: false, reasons: ["Session has not been finalized yet."] };
     }
 
@@ -54,6 +65,11 @@ class AppealService {
     const deadline = new Date(session.finalized_at);
     deadline.setDate(deadline.getDate() + APPEAL_WINDOW_DAYS);
     if (new Date() > deadline) {
+      logger.warn("checkEligibility: Appeal window closed", {
+        studentId,
+        sessionId,
+        deadline: deadline.toISOString(),
+      });
       return {
         eligible: false,
         reasons: [`Appeal window closed on ${deadline.toISOString().split("T")[0]}.`],
@@ -67,22 +83,53 @@ class AppealService {
       [sessionId, studentId]
     );
 
+    // If no result or display_score is null, fall back to session_planner_assignments
+    let scoreData = resultRes.rows[0];
+    if (!scoreData || scoreData.display_score == null) {
+      const assignmentRes = await query(
+        `SELECT AVG(marks) as display_score FROM session_planner_assignments
+         WHERE session_id = $1 AND student_id = $2 AND status != 'removed' AND marks IS NOT NULL`,
+        [sessionId, studentId]
+      );
+      if (assignmentRes.rows[0]?.display_score != null) {
+        scoreData = assignmentRes.rows[0];
+      }
+    }
+
+    logger.info("checkEligibility: Score data", {
+      studentId,
+      sessionId,
+      finalResultsFound: resultRes.rows.length,
+      scoreValue: scoreData?.display_score,
+    });
+
     const marksRes = await query(
       `SELECT faculty_id, marks FROM session_planner_assignments
        WHERE session_id = $1 AND student_id = $2 AND status != 'removed' AND marks IS NOT NULL`,
       [sessionId, studentId]
     );
 
+    logger.info("checkEligibility: Query session_planner_assignments", {
+      studentId,
+      sessionId,
+      marksFound: marksRes.rows.length,
+    });
+
     const reasons = [];
     let scoreAtAppeal = null;
     let facultyGap = null;
 
     // Condition A: score < 2.5
-    if (resultRes.rows.length > 0) {
-      scoreAtAppeal = parseFloat(resultRes.rows[0].display_score);
+    if (scoreData && scoreData.display_score != null) {
+      scoreAtAppeal = parseFloat(scoreData.display_score);
       if (scoreAtAppeal < APPEAL_SCORE_THRESHOLD) {
         reasons.push(`Your score (${scoreAtAppeal.toFixed(2)}) is below ${APPEAL_SCORE_THRESHOLD}.`);
       }
+    } else {
+      logger.warn("checkEligibility: No score found for student", {
+        studentId,
+        sessionId,
+      });
     }
 
     // Condition B: large gap between faculty scores
@@ -96,11 +143,23 @@ class AppealService {
     }
 
     if (reasons.length === 0) {
+      logger.warn("checkEligibility: No qualifying conditions met", {
+        studentId,
+        sessionId,
+        finalScoreFound: resultRes.rows.length > 0,
+        facultyMarksCount: marksRes.rows.length,
+      });
       return {
         eligible: false,
         reasons: ["Your score does not meet appeal criteria (score >= 2.5 and faculty gap <= 1.5)."],
       };
     }
+
+    logger.info("checkEligibility: Student IS eligible", {
+      studentId,
+      sessionId,
+      reasons,
+    });
 
     return {
       eligible: true,

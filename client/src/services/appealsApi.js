@@ -6,6 +6,10 @@ import api from "./api";
 const BASE = "/appeals";
 const d = (promise) => promise.then((r) => r.data);
 
+/** Get available sessions for student to appeal */
+export const getAvailableSessionsForAppeal = () =>
+  d(api.get(`${BASE}/available-sessions`));
+
 /** Check if student is eligible to appeal a session */
 export const checkAppealEligibility = (sessionId) =>
   d(api.get(`${BASE}/check/${sessionId}`));

@@ -6,6 +6,9 @@ import api from "./api";
 const BASE = "/alerts";
 const d = (promise) => promise.then((r) => r.data);
 
+/** Faculty: get own alerts */
+export const getMyAlerts = () => d(api.get(`${BASE}/my`));
+
 /** Admin: get all unacknowledged alerts */
 export const getUnacknowledgedAlerts = () => d(api.get(BASE));
 

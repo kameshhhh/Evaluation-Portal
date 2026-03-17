@@ -370,10 +370,13 @@ const AlertsAppealsTab = () => {
               </label>
             </div>
 
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Reply Message to Student
+            </label>
             <textarea
               value={resolveNote}
               onChange={(e) => setResolveNote(e.target.value)}
-              placeholder="Optional admin note..."
+              placeholder="Write your reply to the student here... (This message will be visible to the student)"
               rows={3}
               className="w-full border border-gray-300 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400 resize-none"
             />
